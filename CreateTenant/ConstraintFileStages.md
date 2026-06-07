@@ -6,7 +6,11 @@ The rhdr-tenant Konflux configuration consists of three interconnected configura
 
 ---
 
-## Stage 1: Constraints File (`/config/constraints/product/rhdr-tenant.yaml`)
+## Stage 1: Constraints File (`constraints/product/rhdr.yaml`)
+
+**MR workflow:** Constraints land in [konflux-release-data](https://gitlab.cee.redhat.com/releng/konflux-release-data) **MR1** before EC policies, RPAs, and ReleasePlans (MR2). Pattern copied from `constraints/product/rhodf.yaml` (not RHODF `odf4/` image names).
+
+**External prerequisite:** Container repos on `registry.stage.redhat.io/rhdr/` and `registry.redhat.io/rhdr/` are created via a merge request in [releng/pyxis-repo-configs](https://gitlab.cee.redhat.com/releng/pyxis-repo-configs) (see [RHDRReleasePlanAdmissionRequirements.md](./RHDRReleasePlanAdmissionRequirements.md)).
 
 ### Purpose
 **Validation layer** - Acts as a JSONSchema that validates all ReleasePlanAdmission (RPA) resources created by the product team.
@@ -22,8 +26,8 @@ The rhdr-tenant Konflux configuration consists of three interconnected configura
 | Field | Purpose | Example | Required |
 |-------|---------|---------|----------|
 | `spec.origin.pattern` | Which tenant namespace can use these policies | `rhdr-tenant` | Yes |
-| `spec.policy.pattern` | Allowed policy names | `^(registry-rhdr-stage\|registry-rhdr-prod\|fbc-rhdr-stage\|fbc-rhdr-prod)$` | Yes |
-| `spec.data.mapping.components[].repositories[].url.pattern` | Registry namespace for container images | `^registry\.(redhat\|stage\.redhat)\.io/{NAMESPACE}/*` | Yes |
+| `spec.policy.pattern` | Allowed policy names | `^((registry\|fbc)-(rhdr-\|standard\|)(stage\|prod\|standard)*)$` (rhodf-style regex) | Yes |
+| `spec.data.mapping.components[].repositories[].url.pattern` | Registry namespace for container images | `registry\.(redhat\|stage\.redhat)\.io/rhdr/*` | Yes |
 
 ### Template Example
 
@@ -36,7 +40,7 @@ properties:
         type: string
         pattern: rhdr-tenant  # ← Only rhdr-tenant RPAs validated
       policy:
-        pattern: ^(registry-rhdr-stage|registry-rhdr-prod|fbc-rhdr-stage|fbc-rhdr-prod|registry-standard|fbc-standard)$
+        pattern: ^((registry|fbc)-(rhdr-|standard|)(stage|prod|standard)*)$
       data:
         properties:
           mapping:
@@ -51,7 +55,7 @@ properties:
                         properties:
                           url:
                             type: string
-                            pattern: ^registry\.(redhat|stage\.redhat)\.io/rh-disaster-recovery/*  # ← Validates image registry paths
+                            pattern: registry\.(redhat|stage\.redhat)\.io/rhdr/*  # ← Validates image registry paths (rhdr product namespace)
 ```
 
 ### Validation Workflow

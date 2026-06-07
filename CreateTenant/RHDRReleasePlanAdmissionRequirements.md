@@ -149,9 +149,18 @@ Until RPAs exist, images remain on Konflux Quay only; they are **not** automatic
 
 `rhdr-tenant` is onboarded for **builds** (namespace, RBAC, application, components, image repositories). It is **not** onboarded for **managed releases** to `registry.redhat.io` / `registry.stage.redhat.io`.
 
-To release RHDR 4.22 (and later FBC), you need **three releng layers** plus **tenant ReleasePlans**, following the same pattern as `rhodf-tenant` and `rhwa-tenant`:
+To release RHDR 4.22 (and later FBC), you need **three releng layers** plus **tenant ReleasePlans**, following **`rhodf-tenant`** (single application, one stage/prod RPA pair).
 
-1. Constraints — `constraints/product/rhdr.yaml` (or `rhdr-tenant.yaml`; must match team convention)
+### Two-MR workflow (konflux-release-data)
+
+| MR | Contents | Status |
+|----|----------|--------|
+| **MR1** | `constraints/product/rhdr.yaml` + CODEOWNERS | Ready for review |
+| **MR2** | EC policies, `rhdr-4-22` stage/prod RPAs, ReleasePlans | After MR1 merges |
+
+**Prerequisite (parallel):** [releng/pyxis-repo-configs](https://gitlab.cee.redhat.com/releng/pyxis-repo-configs) MR to create product and `rhdr/*` container repositories on **staging** and **production** registries (template: `products/rhodf/rhodf.yaml`). Required before the first release push, not for MR1.
+
+1. Constraints — `constraints/product/rhdr.yaml` (pattern: `constraints/product/rhodf.yaml`)
 2. Enterprise Contract policies — `registry-rhdr-stage`, `registry-rhdr-prod` (and later `fbc-rhdr-*` if using FBC index releases)
 3. RPAs — stage + prod per release stream (e.g. `rhdr-4-22-stage.yaml`, `rhdr-4-22-prod.yaml`)
 4. ReleasePlans in `tenants-config` — pair per application, pointing at those RPA names
@@ -209,7 +218,7 @@ Build pipeline annotation on components: `docker-build-multi-platform-oci-ta`.
 
 | Area | Status for RHDR |
 |------|-----------------|
-| `constraints/product/rhdr*.yaml` | **Missing** |
+| `constraints/product/rhdr.yaml` | **MR1** (rhodf-shaped; `rhdr/*` registry namespace) |
 | `config/stone-prod-p02.hjvn.p1/product/EnterpriseContractPolicy/registry-rhdr-*` | **Missing** |
 | `config/stone-prod-p02.hjvn.p1/product/ReleasePlanAdmission/rhdr/` | **Missing** (no directory) |
 | `prodsec/` entry for RHDR product | **Not found** in repo |

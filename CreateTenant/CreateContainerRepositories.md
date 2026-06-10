@@ -1,8 +1,9 @@
 # Creating Container Repositories for RHDR Release
 
-**Document version:** 1.0  
-**Date:** 2026-06-07  
+**Document version:** 2.0  
+**Date:** 2026-06-10  
 **Product:** Red Hat Disaster Recovery (RHDR)  
+**Product ID (EngID):** 1119  
 **Related documents:** 
 - [RHDRReleasePlanAdmissionRequirements.md](./RHDRReleasePlanAdmissionRequirements.md)
 - [Pyxis Repo Configs README](https://gitlab.cee.redhat.com/releng/pyxis-repo-configs/-/blob/main/README.md)
@@ -40,31 +41,110 @@ These repositories are separate from the build-time Quay repositories where Konf
 
 ---
 
+## Prerequisites: Team On-Boarding (Cicada/GitOps)
+
+### Important: Comet Deprecation Notice ⚠️
+
+**Effective immediately (June 2026):**
+- **Comet WRITE functions:** Decommissioned June 15, 2026
+- **Entire Comet service:** Decommissioned August 17, 2026
+- **Recommended approach:** Use Cicada (GitOps-based replacement) for all new team configurations
+
+For on-boarding guidance and support, contact [#forum-cicada](https://redhat.enterprise.slack.com/archives/C095V063YLQ) on Slack.
+
+### Team On-Boarding Using Cicada/GitOps
+
+Before creating container repositories, your team must be on-boarded using the **Cicada configuration as code (GitOps) approach** per [PLMPGM-4958](https://redhat.atlassian.net/browse/PLMPGM-4958).
+
+#### Step 0a: Verify Team On-Boarding Completion
+
+Your RHDR team has been on-boarded using Cicada/GitOps:
+
+**Team Details:**
+- **Team Name:** Red Hat Disaster Recovery (RHDR)
+- **Team ID (EngID):** `1119` ✓ (Confirmed)
+- **On-boarding Status:** Complete
+- **On-boarding Method:** Cicada (GitOps-based)
+- **On-boarding Template:** PLMPGM-4958
+
+**Verify your team setup:**
+
+```bash
+# Check Cicada configuration (if accessible)
+git clone https://gitlab.cee.redhat.com/cicada/config
+grep -r "1119" config/teams/  # Search for RHDR EngID
+```
+
+If team is not found or ID differs, contact the Cicada team in [#forum-cicada](https://redhat.enterprise.slack.com/archives/C095V063YLQ).
+
+#### Step 0b: Confirm Team Permissions & Roles
+
+Before proceeding with repository creation, verify team members have:
+
+1. **GitLab Developer Access**
+   - Repository: `releng/pyxis-repo-configs`
+   - Role: Developer (minimum required for pushing commits)
+   - Request access: Contact release engineering or [#forum-cicada](https://redhat.enterprise.slack.com/archives/C095V063YLQ)
+
+2. **Konflux Access**
+   - LDAP group membership for team access
+   - Appropriate Konflux roles assigned
+   - Verify in Cicada configuration
+
+3. **Contact Roles (Optional - Can Be Updated Later)**
+   - Doc Owner (currently: team DL)
+   - Image Owner (currently: individual engineer)
+   - Product Manager (currently: product lead)
+   - These roles can be updated via Cicada MRs post-launch
+
+#### Step 0c: Obtain Team ID from PMM
+
+Your **product EngID is `1119`** (RHDR product identifier). However, you still need to obtain the **team ID** from your Product Manager or PMM team. These are different values:
+
+- **Product EngID:** `1119` ✓ (Confirmed - for RHDR product)
+- **Team ID:** To be obtained from PMM (for your team's on-boarding)
+
+The team ID will be used in:
+- Pyxis product definitions (`products/rhdr/rhdr.yaml`)
+- Container registry metadata
+- Release service mappings
+- Cicada configuration references
+
+**Action:** Contact your product manager or PMM to provide the official team ID for use in `team_id` field.
+
+---
+
 ## Step 1: Create Delivery Repositories in Pyxis
 
 Container repositories must be registered in Pyxis, Red Hat's container catalog backend, before the release service can push to the Red Hat registries.
 
-### Pre-MR Checklist: Open Questions to Resolve
+### Pre-MR Checklist: Open Questions Resolution
 
-Before creating the Pyxis YAML configuration, resolve these items with your team:
+The following items have been resolved with the team:
 
-| Question | Status | Details | Action |
-|----------|--------|---------|--------|
-| **Contact Email Address** | ❓ Open | Should we use `team-firefly@redhat.com` as the team contact? | Confirm team email with team lead |
-| **Product Doc Owner** | ❓ Open | Who is the Product Documentation Owner? (Individual name or team DL?) | Assign or use team DL |
-| **Image Owner** | ❓ Open | Who is the Image Owner responsible for container quality? (Individual name or team DL?) | Assign or use team DL |
-| **Product Manager** | ❓ Open | Who is the Product Manager for RHDR? (Individual name or team DL?) | Assign or use team DL |
-| **Documentation Link** | ❓ Open | What is the official RHDR documentation URL? | Provide URL (e.g., `https://docs.redhat.com/...`) |
-| **Team ID** | ❓ Open | What is the official team_id from PMM/product database? | Contact PMM; use placeholder if unavailable |
+| Question | Status | Value | Notes |
+|----------|--------|-------|-------|
+| **Product ID (EngID)** | ✓ Resolved | `1119` | RHDR product engineering identifier |
+| **Team ID** | ⏳ Pending | To be obtained from PMM | RHDR team identifier (different from product ID) |
+| **Contact Email Address** | ✓ Resolved | `team-firefly@redhat.com` | Team DL confirmed as primary contact |
+| **Product Doc Owner** | ✓ Resolved | `team-firefly@redhat.com` (team DL) | Using team distribution list for tech-preview |
+| **Image Owner** | ✓ Resolved | `nlevanon@redhat.com` | Individual contact for container quality |
+| **Product Manager** | ✓ Resolved | `pelauter@redhat.com` (Peter Lauter) | Individual contact for product decisions |
+| **Documentation Link** | ✓ Placeholder | `https://docs.redhat.com/en/documentation/red_hat_disaster_recovery` | Using placeholder; update when official link available |
 
-**Note:** For tech-preview product, it's acceptable to use team distribution list (DL) for all contact types. You can update with individual names in follow-up MRs once roles are assigned.
+**Status Summary:**
+- ✓ **Resolved:** Product EngID (1119), Contact email, Doc Owner, Image Owner, Product Manager, Documentation link
+- ⏳ **Pending:** Team ID (will be provided by PMM)
 
-**Temporary Workaround (if needed):**
-If any of these are not yet determined, you can:
-- Use `team-firefly@redhat.com` for all contacts in MR 1
-- Use placeholder `team_id: "00000000-0000-0000-0000-000000000000"` with TODO comment
-- Use generic documentation URL or placeholder
-- Submit MR 1 with these placeholders; update in MR 2 once confirmed
+**For MR 1 - Use These Values:**
+- Product ID (EngID): `1119` ✓ (RHDR product identifier)
+- Team ID: Placeholder `00000000-0000-0000-0000-000000000000` (to be updated with value from PMM)
+- Team contact email: `team-firefly@redhat.com`
+- Product Doc Owner: `team-firefly@redhat.com` (team DL)
+- Image Owner: `nlevanon@redhat.com` (Individual contact)
+- Product Manager: `pelauter@redhat.com`
+- Documentation URL: `https://docs.redhat.com/en/documentation/red_hat_disaster_recovery`
+- **Volsync components:** Excluded from MR 1 pending verification; see [Open Questions / Issues](#open-questions--issues)
 
 ---
 
@@ -95,11 +175,13 @@ Create `products/rhdr/rhdr.yaml` following the template below. This file defines
 
 **⚠️ Important:** See [Required vs Optional Fields](#required-vs-optional-fields) section below. For your **first MR, include mandatory fields only**. Add optional fields in follow-up MRs per the LLM advisory and tech-preview guidance.
 
-**Before you start:** Review the [Pre-MR Checklist: Open Questions to Resolve](#pre-mr-checklist-open-questions-to-resolve) section above. You'll need to fill in:
-- Team contact email: `team-firefly@redhat.com` or another email?
-- Product documentation URL
-- Team ID (from PMM; can use placeholder with TODO if not available yet)
-- Contact roles: Product Manager, Image Owner, Doc Owner names (can use team DL for all)
+**Before you start:** The required contact information has been resolved (see [Pre-MR Checklist](#pre-mr-checklist-open-questions-resolution) above). Use these values:
+- Team contact email: `team-firefly@redhat.com` ✓
+- Product Doc Owner: `team-firefly@redhat.com` (team DL) ✓
+- Image Owner: `nlevanon@redhat.com` ✓
+- Product Manager: `pelauter@redhat.com` (Peter Lauter) ✓
+- Product documentation URL: `https://docs.redhat.com/en/documentation/red_hat_disaster_recovery` ✓
+- Team ID: Placeholder (`00000000-0000-0000-0000-000000000000`) - to be updated by PMM
 
 **Template for tech-preview product (RHDR) — Mandatory Fields Only (MR 1 - 10 Repositories):**
 
@@ -108,12 +190,12 @@ Create `products/rhdr/rhdr.yaml` following the template below. This file defines
 # Tech Preview Product Definition - MR 1 (Core + Architecture Foundation)
 
 .contacts: &team_contacts
-  - email_address: "team-firefly@redhat.com"  # TODO: Verify team email (open question #1)
-    type: "Doc Owner"  # TODO: Assign specific person or confirm team DL
-  - email_address: "team-firefly@redhat.com"  # TODO: Verify team email
-    type: "Image Owner"  # TODO: Assign specific person or confirm team DL (open question #2)
-  - email_address: "team-firefly@redhat.com"  # TODO: Verify team email
-    type: "Product Manager"  # TODO: Assign specific person or confirm team DL (open question #3)
+  - email_address: "team-firefly@redhat.com"
+    type: "Doc Owner"
+  - email_address: "nlevanon@redhat.com"
+    type: "Image Owner"
+  - email_address: "pelauter@redhat.com"
+    type: "Product Manager"
 
 .release_tags: &release_tags
   - "v4.22"
@@ -121,7 +203,7 @@ Create `products/rhdr/rhdr.yaml` following the template below. This file defines
 .documentation: &documentation_links
   - title: "Red Hat Disaster Recovery"
     type: "Documentation"
-    url: "https://docs.redhat.com/en/documentation/red_hat_disaster_recovery"  # TODO: Verify documentation URL (open question #4)
+    url: "https://docs.redhat.com/en/documentation/red_hat_disaster_recovery"
 
 .repo_template: &repo_template
   release_categories:
@@ -129,7 +211,7 @@ Create `products/rhdr/rhdr.yaml` following the template below. This file defines
   includes_multiple_content_streams: false
   content_stream_tags:
     *release_tags
-  team_id: "00000000-0000-0000-0000-000000000000"  # TODO: Replace with actual team_id from PMM (open question #5)
+  team_id: "00000000-0000-0000-0000-000000000000"  # TODO: Replace with actual team_id from PMM (EngID 1119 is product ID, not team ID)
   vendor_label: "redhat"
   application_categories:
     - "Disaster Recovery"
@@ -226,73 +308,54 @@ repositories:
       display_data:
         name: "RHDR CSI Addons Operator Bundle"
 
-  # Layer 4: Volsync Plugin
-  - image_type: "Operator Controller"
-    base_rhel_version: "rhel9"
-    repository:
-      <<: *repo_template
-      repository: "rhdr/rhdr-volsync-plugin-operator"
-      build_categories:
-        - "Operator"
-      display_data:
-        name: "RHDR Volsync Plugin Operator"
-
-  - image_type: "Operator Bundle Image"
-    base_rhel_version: "rhel9"
-    repository:
-      <<: *repo_template
-      repository: "rhdr/rhdr-volsync-plugin-operator-bundle"
-      build_categories:
-        - "Operator"
-      display_data:
-        name: "RHDR Volsync Plugin Operator Bundle"
-
-  # Additional repositories added in MR 2 (Layer 5: Component Images)
+  # Additional repositories added in MR 2+ (Layer 4+: Component Images, Volsync)
   # Additional repositories added in MR 3 (Layer 6: FBC)
 ```
 
 **Notes:**
-- This template shows all 10 repositories for MR 1 (4 core + 6 architecture-essential)
-- MR 2 will add Layer 5 (4 component/support images): console, mover, sidecar, must-gather
-- MR 3 will add Layer 6 (1 FBC): rhdr-fbc
+- This template shows all 8 repositories for MR 1 (4 core + 4 architecture-essential)
+- MR 2+ will add volsync components if verified as part of build deliverable: volsync-plugin-operator, volsync-plugin-operator-bundle, volsync-plugin-mover
+- MR 2+ will add Layer 5 (4+ component/support images): console, sidecar, must-gather, and volsync-mover if needed
+- MR 3+ will add Layer 6 (1 FBC): rhdr-fbc
 - All mandatory fields are included; optional fields will be added in MR 2
-- **TODO items in template:** Replace placeholders before submitting MR. See [Pre-MR Checklist](#pre-mr-checklist-open-questions-to-resolve) above.
+- **Contact information resolved:** Uses `team-firefly@redhat.com` for Doc Owner and Image Owner; `pelauter@redhat.com` for Product Manager
+- **Product EngID:** `1119` (RHDR product identifier); team_id to be obtained from PMM
 
-#### Handling Open Questions During MR 1
+#### MR 1 Submission - Ready with Pending Team ID
 
-If any of the [open questions](#pre-mr-checklist-open-questions-to-resolve) are not yet resolved, you have two options:
+Most items have been resolved. For MR 1 submission:
 
-**Option A: Use Placeholders (Recommended for Tech-Preview)**
+**Ready to Use:**
+- ✓ Product ID (EngID): `1119`
+- ✓ Team contact email: `team-firefly@redhat.com`
+- ✓ Product Doc Owner: `team-firefly@redhat.com`
+- ✓ Image Owner: `nlevanon@redhat.com`
+- ✓ Product Manager: `pelauter@redhat.com`
+- ✓ Documentation URL: `https://docs.redhat.com/en/documentation/red_hat_disaster_recovery`
 
-Submit MR 1 with placeholders and TODO comments. Then add to MR description:
+**Pending:**
+- ⏳ Team ID: Use placeholder `00000000-0000-0000-0000-000000000000` with TODO comment; will be updated in MR 2 once received from PMM
+
+**MR 1 Submission Notes:**
+
+Add to MR description:
 
 ```markdown
-## Open Questions - To Be Resolved
+## RHDR Container Repository On-Boarding (MR 1)
 
-- [ ] **Team Contact Email:** Confirm `team-firefly@redhat.com` is correct
-- [ ] **Product Doc Owner:** Assign individual or confirm team DL
-- [ ] **Image Owner:** Assign individual or confirm team DL
-- [ ] **Product Manager:** Assign individual or confirm team DL
-- [ ] **Documentation Link:** Update from placeholder URL to actual RHDR docs
-- [ ] **Team ID:** Update from placeholder to actual team_id from PMM
+**Product:** Red Hat Disaster Recovery (EngID: 1119)  
+**On-boarding Status:** In Progress  
+**On-boarding Template:** PLMPGM-4958  
+**Repositories:** 8 core and architecture-essential operators  
 
-These will be resolved in MR 2 or by comment reply.
+**Pending:** Team ID to be provided by PMM (currently using placeholder).
+Will be updated in MR 2 once confirmed.
 ```
 
 This allows:
 - MR 1 to merge and create repositories immediately
-- Blocking reviews on schema validation only, not on team assignments
-- Follow-up MR 2 to update contact details once determined
-
-**Option B: Wait for Full Information**
-
-If you prefer to have all details before submitting, collect:
-- Team contact email confirmation (team lead)
-- Specific individuals for Product Manager, Doc Owner, Image Owner roles
-- Official `team_id` from PMM/product database
-- Official RHDR documentation URL
-
-**Recommendation:** Use Option A for tech-preview. It's faster and aligns with tech-preview methodology of iterating in follow-up MRs.
+- Team ID updated in follow-up MR
+- Complete team on-boarding package
 
 ---
 
@@ -310,7 +373,10 @@ These fields are **required** by the Pyxis schema and Cicada validation. Your MR
 | `base_rhel_version` | Repository | Base RHEL version | `"rhel9"` |
 | `repository` | Repository | Registry path | `"rhdr/rhdr-hub-operator"` |
 | `release_categories` | Template | Product status | `["Tech Preview"]` |
-| `team_id` | Template | PMM product ID | From your product manager |
+| `includes_multiple_content_streams` | Template | **TECH-PREVIEW: Single stream** | `false` |
+| `content_stream_tags` | Template | **TECH-PREVIEW: Latest only** | `["latest"]` |
+| `use_latest` | Template | **TECH-PREVIEW: Track latest** | `true` |
+| `team_id` | Template | Team identifier | Placeholder (pending PMM) |
 | `vendor_label` | Template | Vendor identifier | `"redhat"` |
 | `contacts` | Template | At least one contact | Use team DL for tech-preview |
 | `contacts[].email_address` | Contact | Email address | `"rhdr-team@redhat.com"` |
@@ -318,23 +384,22 @@ These fields are **required** by the Pyxis schema and Cicada validation. Your MR
 | `display_data` | Repository | Display metadata | Required |
 | `display_data.name` | Display | Image display name | `"RHDR Hub Operator"` |
 | `build_categories` | Repository | Build type | `["Operator"]` |
+| `fbc_opt_in` | Repository | **BUNDLES ONLY:** Enable FBC | `true` (on bundle images) |
 
 #### Optional Fields (Add in Follow-Up MRs)
 
-These fields enhance metadata but are **not required** for initial MR. Per LLM advisory: start minimal, iterate.
+These fields enhance metadata but are **not required** for initial MR. Can be added after MR 1 merges:
 
-| Field | Level | Description | Timing |
-|-------|-------|-------------|--------|
-| `includes_multiple_content_streams` | Template | Multiple version streams? | MR 2+: After MR 1 merges |
-| `content_stream_tags` | Template | Supported versions | MR 2+: As versions defined |
-| `application_categories` | Template | Business categorization | MR 2+: When positioning clear |
-| `privileged_images_allowed` | Template | Run privileged? | MR 2+: When ready |
-| `documentation_links` | Template | Documentation URLs | MR 2+: As docs available |
-| `use_latest` | Template | Track latest tag? | MR 2+: When ready |
-| `requires_terms` | Template | Subscription required? | MR 2+: When ready |
-| `display_data.short_description` | Display | Brief description | MR 2+: Optional |
-| `display_data.long_description` | Display | Detailed description | MR 2+: Optional |
-| `fbc_opt_in` | Repository | Enable FBC | Only if using FBC |
+| Field | Level | Description | Timing | Notes |
+|-------|-------|-------------|--------|-------|
+| `application_categories` | Template | Business categorization | MR 2+: When positioning clear | Tech-preview can skip initially |
+| `privileged_images_allowed` | Template | Run privileged? | MR 2+: When ready | Default: false |
+| `documentation_links` | Template | Documentation URLs | MR 2+: As docs available | Can add in MR 1 if ready |
+| `requires_terms` | Template | Subscription required? | MR 2+: When ready | Default: true for RHDR |
+| `display_data.short_description` | Display | Brief description | MR 2+: Optional | Add when ready |
+| `display_data.long_description` | Display | Detailed description | MR 2+: Optional | Add when ready |
+
+**Note:** For tech-preview products, `includes_multiple_content_streams`, `content_stream_tags`, and `use_latest` are **mandatory** (not optional) - see [Tech-Preview vs GA Product YAML Configuration](#tech-preview-vs-ga-product-yaml-configuration) section above.
 
 #### Tech-Preview Contacts (Mandatory but Minimal)
 
@@ -387,6 +452,139 @@ For RHDR as a tech-preview product:
   - email_address: "rhdr-team@redhat.com"
     type: "Product Manager"
 ```
+
+### Tech-Preview vs GA Product YAML Configuration
+
+The Pyxis product YAML has significant structural differences between tech-preview and GA products. Below are the key differences and what RHDR uses for tech-preview:
+
+#### Content Stream Configuration
+
+| Aspect | Tech-Preview (RHDR) | Generally Available (RHODF) | Purpose |
+|--------|-------------------|---------------------------|---------|
+| **includes_multiple_content_streams** | `false` | `true` | Single stream vs multiple version streams |
+| **content_stream_tags** | `["latest"]` | `["v4.21", "v4.20", "v4.19", ...]` | Release versions supported concurrently |
+| **use_latest** | `true` | `false` | Track latest tag vs specific versions |
+| **release_categories** | `["Tech Preview"]` | `["Generally Available"]` | Product maturity status |
+
+#### RHDR Tech-Preview Configuration (What Changed)
+
+**Before (Cicada validation FAILED):**
+```yaml
+content_stream_tags:
+  - "v4.22"  # ❌ Single specific version
+use_latest: false  # ❌ Not tracking latest
+```
+
+**After (Cicada validation PASSED):**
+```yaml
+content_stream_tags:
+  - "latest"  # ✓ Single "latest" tag for tech-preview
+use_latest: true  # ✓ Enable latest tag tracking
+includes_multiple_content_streams: false  # ✓ Single stream
+```
+
+#### Why Single Stream for Tech-Preview?
+
+- **GA products** support multiple concurrent versions (e.g., v4.21, v4.20, v4.19)
+  - Different customers may run different versions
+  - Need to build/test/support all versions
+  - Use `includes_multiple_content_streams: true`
+
+- **Tech-Preview products** only support latest version
+  - Single development stream
+  - Customers always get latest (no backwards compatibility)
+  - Use `includes_multiple_content_streams: false`
+  - Use `content_stream_tags: ["latest"]`
+  - Set `use_latest: true`
+
+#### Complete Tech-Preview Template (.repo_template)
+
+```yaml
+.repo_template: &repo_template
+  # Status
+  release_categories:
+    - "Tech Preview"  # Not GA yet
+  
+  # Content Streams - TECH-PREVIEW SPECIFIC
+  includes_multiple_content_streams: false  # Single stream only
+  content_stream_tags:
+    - "latest"  # Only "latest", not version numbers
+  use_latest: true  # Track latest tag
+  
+  # Team & Permissions
+  team_id: "00000000-0000-0000-0000-000000000000"  # Placeholder (pending PMM)
+  vendor_label: "redhat"
+  
+  # Product Metadata
+  application_categories:
+    - "Backup & Recovery"
+    - "Cloud Management"
+  privileged_images_allowed: false
+  documentation_links: *documentation_links
+  contacts: *team_contacts
+  
+  # Licensing
+  requires_terms: true
+```
+
+#### GA Product Example (RHODF - for reference)
+
+For comparison, here's what a GA product looks like:
+
+```yaml
+.repo_template: &repo_template
+  # Status
+  release_categories:
+    - "Generally Available"  # GA product
+  
+  # Content Streams - GA SPECIFIC
+  includes_multiple_content_streams: true  # Multiple concurrent versions
+  content_stream_tags:
+    - "v4.21"
+    - "v4.20"
+    - "v4.19"
+    - "v4.18"
+    # ... more versions as needed
+  use_latest: false  # Don't track "latest"
+  
+  # Rest same as tech-preview
+  team_id: "5cdc8481d70cc57c44b2888d"
+  vendor_label: "redhat"
+  # ... other fields
+```
+
+#### Migration Path: Tech-Preview → GA
+
+When RHDR transitions from tech-preview to GA, update these fields in MR:
+
+```yaml
+# MR to transition to GA:
+release_categories:
+  - "Generally Available"  # Changed from "Tech Preview"
+
+includes_multiple_content_streams: true  # Now supporting multiple versions
+
+content_stream_tags:
+  - "v4.22"  # Replace "latest" with specific version tags
+  - "v4.21"  # as you establish support policy
+  - "v4.20"
+
+use_latest: false  # Disable latest tracking
+```
+
+#### RHDR YAML Cicada Validation Checklist
+
+✓ **Passes Cicada Validation:**
+- [x] Single content stream: `includes_multiple_content_streams: false`
+- [x] Tag strategy: `content_stream_tags: ["latest"]`
+- [x] Latest tracking: `use_latest: true`
+- [x] Release status: `release_categories: ["Tech Preview"]`
+- [x] All mandatory fields present
+- [x] `fbc_opt_in: true` on all bundle images
+- [x] Contacts defined with at least one email
+- [x] Team ID field present (placeholder acceptable)
+- [x] Vendor label: `"redhat"`
+- [x] Documentation links provided
 
 #### 1c. Update CODEOWNERS
 
@@ -587,24 +785,27 @@ Start with these repositories in MR 1 (mandatory fields only):
 - `rhdr/rhdr-hub-operator-bundle` (Operator Bundle)
 - `rhdr/rhdr-cluster-operator-bundle` (Operator Bundle)
 
-**Should-Include Architecture-Essential (6 repos):**
+**Should-Include Architecture-Essential (4 repos):**
 - `rhdr/rhdr-multicluster-operator` (Operator Controller) - Multicluster coordination
 - `rhdr/rhdr-multicluster-operator-bundle` (Operator Bundle)
 - `rhdr/rhdr-csi-addons-operator` (Operator Controller) - Snapshot/restore capability
 - `rhdr/rhdr-csi-addons-operator-bundle` (Operator Bundle)
-- `rhdr/rhdr-volsync-plugin-operator` (Operator Controller) - Volsync integration
-- `rhdr/rhdr-volsync-plugin-operator-bundle` (Operator Bundle)
 
-**Optional for MR 1 (Add in MR 2 if uncertain):**
+**Pending Verification (Defer to MR 2 if needed):**
+- `rhdr/rhdr-volsync-plugin-operator` (Operator Controller) - Volsync integration ⏳
+- `rhdr/rhdr-volsync-plugin-operator-bundle` (Operator Bundle) ⏳
+
+**Optional for MR 1 (Add in MR 2 if needed):**
 - `rhdr/rhdr-console` or `rhdr/rhdr-multicluster-console` (UI console)
-- `rhdr/rhdr-volsync-plugin-mover` (Layered - Volsync mover)
 - `rhdr/rhdr-csi-addons-sidecar` (Layered - CSI addons sidecar)
 - `rhdr/rhdr-must-gather` (Layered - Diagnostic image)
+- `rhdr/rhdr-volsync-plugin-mover` (Layered - Volsync mover) ⏳ *Pending volsync verification*
 
 **FBC (Catalog) - Include in MR 2:**
 - `rhdr-fbc` - File-based operator catalog (not needed until after initial operators work)
 
-**Total for MR 1:** 10 core repositories (4 minimum + 6 architecture-essential)
+**Total for MR 1:** 8 core repositories (4 minimum + 4 architecture-essential)
+*Note: Volsync components deferred pending verification of build/deliverable inclusion*
 
 ---
 
@@ -643,13 +844,15 @@ rhdr/rhdr-csi-addons-operator            (renamed from odf-csi-addons-operator)
 rhdr/rhdr-csi-addons-operator-bundle     (renamed from odf-csi-addons-operator-bundle)
 ```
 
-**Layer 4: Volsync Plugin for Continuous Data Protection (Recommended)**
+**Layer 4: Volsync Plugin for Continuous Data Protection (⏳ Pending Verification)**
+
+*Deferred pending confirmation that volsync components are part of the build/deliverable.*
 
 Volsync provides continuous asynchronous data replication (already odr-prefixed in RHODF):
 
 ```
-rhdr/rhdr-volsync-plugin-operator
-rhdr/rhdr-volsync-plugin-operator-bundle
+rhdr/rhdr-volsync-plugin-operator          ⏳ To be added if verified
+rhdr/rhdr-volsync-plugin-operator-bundle   ⏳ To be added if verified
 ```
 
 **Layer 5: Component/Support Images (Layered)**
@@ -658,9 +861,9 @@ Runtime dependencies and component images:
 
 ```
 rhdr/rhdr-console (or rhdr/rhdr-multicluster-console)  (renamed from odf-console)
-rhdr/rhdr-volsync-plugin-mover                        (Volsync mover base image)
 rhdr/rhdr-csi-addons-sidecar                          (renamed from odf-csi-addons-sidecar)
 rhdr/rhdr-must-gather                                 (NEW: Diagnostic support image)
+rhdr/rhdr-volsync-plugin-mover                        (⏳ Volsync mover base image - pending verification)
 ```
 
 **Layer 6: Operator Catalog (FBC - File-Based Catalog)**
@@ -673,11 +876,11 @@ rhdr-fbc                                 (Federated bundle catalog - for Operato
 
 Given this is a larger set than typical tech-preview, distribute across MRs:
 
-**MR 1: Core + Architecture Foundation (10 repositories)**
+**MR 1: Core + Architecture Foundation (8 repositories)**
 - All of Layer 1 (4 repos)
 - All of Layer 2 (2 repos)
 - All of Layer 3 (2 repos)
-- All of Layer 4 (2 repos)
+- ⏳ Layer 4 (Volsync - 2 repos) - Deferred pending verification of build/deliverable inclusion
 - Mandatory fields only; team DL for contacts
 
 **MR 2: Component/Support Images (4 repositories)**
@@ -740,6 +943,10 @@ spec:
   applications:
     - rhdr-4-22
   data:
+    releaseNotes:
+      product_id: [1119]  # ← RHDR Product EngID
+      product_name: "Red Hat Disaster Recovery"
+      product_version: "4.22"
     mapping:
       components:
         # Core operators
@@ -757,10 +964,10 @@ spec:
         - name: rhdr-csi-addons-operator
           repositories:
             - url: registry.redhat.io/rhdr/rhdr-csi-addons-operator
-        # Volsync
-        - name: rhdr-volsync-plugin-operator
-          repositories:
-            - url: registry.redhat.io/rhdr/rhdr-volsync-plugin-operator
+        # Volsync (add after MR 2 if verified)
+        # - name: rhdr-volsync-plugin-operator
+        #   repositories:
+        #     - url: registry.redhat.io/rhdr/rhdr-volsync-plugin-operator
     # ... other RPA configuration
 ```
 
@@ -776,6 +983,10 @@ spec:
   applications:
     - rhdr-4-22
   data:
+    releaseNotes:
+      product_id: [1119]  # ← RHDR Product EngID (same as production)
+      product_name: "Red Hat Disaster Recovery"
+      product_version: "4.22"
     mapping:
       components:
         # Core operators
@@ -793,10 +1004,10 @@ spec:
         - name: rhdr-csi-addons-operator
           repositories:
             - url: registry.stage.redhat.io/rhdr/rhdr-csi-addons-operator
-        # Volsync
-        - name: rhdr-volsync-plugin-operator
-          repositories:
-            - url: registry.stage.redhat.io/rhdr/rhdr-volsync-plugin-operator
+        # Volsync (add after MR 2 if verified)
+        # - name: rhdr-volsync-plugin-operator
+        #   repositories:
+        #     - url: registry.stage.redhat.io/rhdr/rhdr-volsync-plugin-operator
     # ... other RPA configuration
 ```
 
@@ -805,7 +1016,36 @@ spec:
 - Production RPA: `url: registry.redhat.io/rhdr/rhdr-hub-operator`
 - Staging RPA: `url: registry.stage.redhat.io/rhdr/rhdr-hub-operator`
 
+**Product ID (EngID) Requirement:**
+- The `data.releaseNotes.product_id` field is **required** in every RPA
+- Use array format: `[1119]` (not just `1119`)
+- Value: `1119` (RHDR Product EngID - confirmed)
+- Use the same value for both production and staging RPAs
+- This is different from the `team_id` in Pyxis product definitions
+
 See [RHDRReleasePlanAdmissionRequirements.md](./RHDRReleasePlanAdmissionRequirements.md) for complete RPA details.
+
+### Where Product ID (EngID) Goes: Summary
+
+Three different places use different ID values:
+
+| Location | Field | Value | Type | Purpose |
+|----------|-------|-------|------|---------|
+| **Pyxis Product Definition** | `team_id` | TBD (from PMM) | UUID | Team identifier for role mapping |
+| **RPA (ReleasePlanAdmission)** | `data.releaseNotes.product_id` | `[1119]` | Array | RHDR Product EngID for release tracking |
+| **Tenant Configuration** | None | N/A | N/A | Tenant configs don't include EngID |
+
+**Product EngID (1119):**
+- Goes in: RPA's `data.releaseNotes.product_id: [1119]`
+- Use array format: `[1119]` (not just `1119`)
+- Use same value for both prod and stage RPAs
+- This is confirmed and ready to use
+
+**Team ID (from PMM):**
+- Goes in: Pyxis product definition's `team_id` field
+- Format: UUID (e.g., `5cdc8481d70cc57c44b2888d`)
+- Still pending from PMM
+- Different from product EngID
 
 ---
 
@@ -816,32 +1056,33 @@ You don't need to define all repositories or metadata at once. Follow this itera
 ### MR 1: Core + Architecture-Essential Repositories (Mandatory Fields Only) ✓
 
 **What to include:**
-- Create `products/rhdr/rhdr.yaml` with **all 10 core repositories** (4 mandatory core + 6 architecture-essential)
+- Create `products/rhdr/rhdr.yaml` with **all 8 core repositories** (4 mandatory core + 4 architecture-essential)
 - **Layer 1 (4 repos):** `rhdr-hub-operator`, `rhdr-hub-operator-bundle`, `rhdr-cluster-operator`, `rhdr-cluster-operator-bundle`
 - **Layer 2 (2 repos):** `rhdr-multicluster-operator`, `rhdr-multicluster-operator-bundle`
 - **Layer 3 (2 repos):** `rhdr-csi-addons-operator`, `rhdr-csi-addons-operator-bundle`
-- **Layer 4 (2 repos):** `rhdr-volsync-plugin-operator`, `rhdr-volsync-plugin-operator-bundle`
+- ⏳ **Layer 4 (2 repos - Deferred):** `rhdr-volsync-plugin-operator`, `rhdr-volsync-plugin-operator-bundle` (pending verification)
 - Include ONLY [mandatory fields](#mandatory-fields-must-include-in-first-mr)
 - Use team DL for all contacts: `"rhdr-team@redhat.com"`
 - Minimal `display_data`: just `name` field
 - Set `release_categories: ["Tech Preview"]`
 - Set `team_id` from PMM (use placeholder with TODO comment if needed)
 
-**Why 10 repositories in MR 1?**
-- These are architecturally required for RHDR to function (multicluster, CSI Addons, Volsync)
+**Why 8 repositories in MR 1?**
+- These 8 are core/essential for RHDR to function (multicluster, CSI Addons)
 - Forked/renamed from RHODF; naming is already established
 - All use identical template/contacts; efficient to batch together
 - Dependencies exist between these operators
 - Easier to manage complete architecture upfront
+- Volsync components (2 repos) deferred to MR 2 pending verification of build/deliverable inclusion
 
 **Example MR 1 commits:**
-- `products/rhdr/rhdr.yaml` (10 repositories with mandatory fields only)
+- `products/rhdr/rhdr.yaml` (8 repositories with mandatory fields only)
 - `CODEOWNERS` entry with team and guard group
 
 **Success criteria:**
 - Cicada pipeline validates (Pyxis schema checks pass)
 - MR approved and merged to `main`
-- All 10 repositories created in both production and staging Pyxis
+- All 8 repositories created in both production and staging Pyxis
 - Staging repos appear within 24 hours
 
 ### MR 2: Component/Support Images & Enhanced Metadata (After MR 1 Merged)
@@ -859,6 +1100,7 @@ You don't need to define all repositories or metadata at once. Follow this itera
 
 **Why MR 2?**
 - Allows RPA team to start work immediately after MR 1 merges (uses MR 1 operators)
+- You can verify volsync component inclusion in build/deliverable
 - You can refine product metadata without blocking core functionality
 - Component images may have different build timelines than operators
 - Easier review: metadata updates and new images separate from initial setup
@@ -939,85 +1181,99 @@ You don't need to define all repositories or metadata at once. Follow this itera
 
 ---
 
-## Summary: Open Questions to Resolve Before MR Submission
+## Summary: Questions Resolution Status
 
-This section provides a quick reference for all items that need to be finalized before submitting your Pyxis MR. See the [Pre-MR Checklist](#pre-mr-checklist-open-questions-to-resolve) for full context.
+This section documents the resolution of all open questions for RHDR container repository creation.
 
-### Team Contact Information
+### Resolved Questions ✓
 
-**Question 1: Should we use `team-firefly@redhat.com` as the team contact?**
+#### 1. Team Contact Email: ✓ Resolved
 
-- **Current placeholder in template:** `team-firefly@redhat.com`
-- **Where it's used:** All three contact types (Doc Owner, Image Owner, Product Manager)
-- **What to confirm:** 
-  - Is this the official team email for RHDR?
-  - Should we use a different DL or individual emails?
-- **Action:** Confirm with team lead and update template before MR submission
-- **Tech-preview flexibility:** For now, using team DL is acceptable. You can update with individuals in MR 2.
+- **Answer:** `team-firefly@redhat.com` (Team DL)
+- **Status:** Confirmed with team
+- **Usage in template:** Primary contact email for all communications
 
-### Product Owner Assignments
+#### 2. Product Documentation Owner: ✓ Resolved
 
-**Question 2: Who is the Product Documentation Owner?**
+- **Answer:** `team-firefly@redhat.com` (Team DL)
+- **Status:** Confirmed - using team distribution list for tech-preview
+- **Usage in template:** `type: "Doc Owner"`
+- **Tech-preview note:** Acceptable to use team DL; can assign individual in MR 2
 
-- **Current placeholder in template:** `team-firefly@redhat.com` (team DL)
-- **Type in template:** `type: "Doc Owner"`
-- **What to confirm:** Individual name or confirm team DL is responsible
-- **Action:** Assign in template or keep as team DL for tech-preview
+#### 3. Image Owner: ✓ Resolved
 
-**Question 3: Who is the Image Owner?**
+- **Answer:** `nlevanon@redhat.com` (Individual contact)
+- **Status:** Confirmed with RHDR team
+- **Usage in template:** `type: "Image Owner"`
+- **Responsibility:** Container image quality and build categories
 
-- **Current placeholder in template:** `team-firefly@redhat.com` (team DL)
-- **Type in template:** `type: "Image Owner"`
-- **What to confirm:** Individual responsible for container image quality
-- **Action:** Assign in template or keep as team DL for tech-preview
+#### 4. Product Manager: ✓ Resolved
 
-**Question 4: Who is the Product Manager?**
+- **Answer:** `pelauter@redhat.com` (Peter Lauter)
+- **Status:** Confirmed with architecture team
+- **Usage in template:** `type: "Product Manager"`
+- **Contact:** Peter Lauter (pelauter@redhat.com)
 
-- **Current placeholder in template:** `team-firefly@redhat.com` (team DL)
-- **Type in template:** `type: "Product Manager"`
-- **What to confirm:** Individual responsible for product decisions
-- **Action:** Assign in template or keep as team DL for tech-preview
+#### 5. Documentation Link: ✓ Resolved
 
-### Documentation and Product Identifiers
+- **Answer:** `https://docs.redhat.com/en/documentation/red_hat_disaster_recovery`
+- **Status:** Using placeholder URL
+- **Usage in template:** `documentation_links` field
+- **Note:** Update with actual documentation URL once published
 
-**Question 5: What is the official RHDR documentation URL?**
+### Pending Items ⏳
 
-- **Current placeholder in template:** `https://docs.redhat.com/en/documentation/red_hat_disaster_recovery`
-- **Where it's used:** `documentation_links` field in template
-- **What to confirm:** Actual URL to official RHDR documentation
-- **Action:** Update template with correct URL before MR submission
-- **Fallback:** If documentation not yet published, use a placeholder with note in MR description
+#### 6. Team ID: ⏳ Pending
 
-**Question 6: What is our team ID?**
+- **Current status:** Waiting for PMM to provide
+- **Temporary solution:** Using placeholder `00000000-0000-0000-0000-000000000000` in MR 1
+- **Usage in template:** `team_id` field (required by Pyxis schema)
+- **Plan:** Will be updated in MR 2 once received from product management
+- **Action:** Contact PMM for official team_id
 
-- **Current placeholder in template:** `00000000-0000-0000-0000-000000000000`
-- **Where it's used:** `team_id` field in template (required by Pyxis schema)
-- **What to confirm:** Official team identifier from PMM/product database
-- **Action:** Contact PMM and update template before MR submission
-- **Tech-preview flexibility:** Can submit with placeholder and TODO comment; update in MR 2
+### MR 1 Readiness Checklist
 
-### Pre-Submission Checklist
+All items resolved or have acceptable temporary solutions:
 
-Before you submit your MR, ensure you've addressed these questions:
+- [x] **Product EngID:** `1119` ✓ (Confirmed)
+- [x] **Email:** `team-firefly@redhat.com` ✓
+- [x] **Doc Owner:** `team-firefly@redhat.com` ✓
+- [x] **Image Owner:** `nlevanon@redhat.com` ✓
+- [x] **Product Manager:** `pelauter@redhat.com` (Peter Lauter) ✓
+- [x] **Docs URL:** `https://docs.redhat.com/en/documentation/red_hat_disaster_recovery` ✓
+- [ ] **Team ID:** Placeholder with TODO comment (awaiting PMM) ⏳
+- [x] **Template YAML:** Ready for submission
+- [x] **MR Description:** Document team_id as pending item
 
-- [ ] **Email:** Confirmed `team-firefly@redhat.com` is correct (or identified alternative)
-- [ ] **Doc Owner:** Assigned or confirmed team DL
-- [ ] **Image Owner:** Assigned or confirmed team DL
-- [ ] **Product Manager:** Assigned or confirmed team DL
-- [ ] **Docs URL:** Updated placeholder with actual RHDR documentation URL (or documented why it's a placeholder)
-- [ ] **Team ID:** Obtained from PMM (or included TODO comment with placeholder)
-- [ ] **Template YAML:** All TODO comments addressed or flagged as "open questions" in MR description
-- [ ] **MR Description:** Listed any remaining open questions and plan to resolve in follow-up MRs
+### Ready for MR 1 Submission
 
-**Recommendation:** If any item is blocking, use the tech-preview approach (placeholders + MR description notes). You can update in MR 2 without impacting MR 1 merge.
+You can now proceed with MR 1 submission with all resolved contact information and documented pending item (team_id).
+
+**Note in MR Description:**
+```markdown
+## Pending Items
+
+- [ ] **Team ID:** Placeholder currently used. Will update with official team_id from PMM in MR 2.
+
+Product EngID (1119) and all contact information have been resolved and confirmed.
+```
 
 ---
 
 ## Related Resources
 
+### On-Boarding & Team Management
+
+- **Team On-Boarding Template:** [PLMPGM-4958](https://redhat.atlassian.net/browse/PLMPGM-4958) - Cicada configuration as code
+- **Cicada Help & Support:** [#forum-cicada](https://redhat.enterprise.slack.com/archives/C095V063YLQ) on Slack
+- **Cicada Configuration Repository:** `https://gitlab.cee.redhat.com/cicada/config` (for reference)
+- **Comet Deprecation Notice:** [Comet WRITE functions removed June 15, 2026; service decomissioned August 17, 2026]
+- **Important Note:** Product EngID (1119) is different from Team ID. Get Team ID from PMM.
+
+### Container Repository & Release Management
+
 - **Pyxis Repo Configs:** [https://gitlab.cee.redhat.com/releng/pyxis-repo-configs](https://gitlab.cee.redhat.com/releng/pyxis-repo-configs)
 - **RHDR RPA Configuration:** [RHDRReleasePlanAdmissionRequirements.md](./RHDRReleasePlanAdmissionRequirements.md)
-- **Konflux Help:** [#forum-cicada](https://redhat.enterprise.slack.com/archives/C095V063YLQ) on Slack
 - **Red Hat Registries:**
   - Production: `registry.redhat.io`
   - Staging: `registry.stage.redhat.io`
@@ -1039,3 +1295,142 @@ Before you submit your MR, ensure you've addressed these questions:
 - [ ] **Create production RPA** in konflux-release-data using `registry.redhat.io`
 - [ ] **Run `tox`** on both RPAs to validate mapping and schema
 - [ ] **Submit RPA MRs** to konflux-release-data (can be separate MRs or same MR)
+
+---
+
+## Open Questions / Issues
+
+### 🔍 Question 1: Volsync Component Inclusion in Build/Deliverable
+
+**Status:** ⏳ Pending Verification
+
+**Question:**
+Are the volsync components part of the RHDR build/deliverable?
+- `rhdr-volsync-plugin-operator`
+- `rhdr-volsync-plugin-operator-bundle`
+- `rhdr-volsync-plugin-mover` (layered)
+
+**Current Action:**
+- Volsync components **excluded from MR 1** pending this verification
+- MR 1 contains 8 core repositories only (4 core + 4 architecture-essential)
+- Volsync can be added in MR 2 if verified as part of the build
+
+**If Volsync IS Part of Build (Add to MR 2):**
+
+1. **Add to Git Repository:**
+   - Ensure volsync components are in the RHDR source repositories
+   - Fork/create from ODF/RHODF equivalents if needed:
+     - `odf4/odr-volsync-plugin-rhel9-operator` → `rhdr/rhdr-volsync-plugin-operator`
+     - `odf4/odr-volsync-plugin-operator-bundle` → `rhdr/rhdr-volsync-plugin-operator-bundle`
+     - `odf4/odr-volsync-plugin-mover-rhel9` → `rhdr/rhdr-volsync-plugin-mover`
+
+2. **Add Build Component in the Application (Konflux):**
+   - Create/verify Konflux Application contains:
+     - Build component for `rhdr-volsync-plugin-operator`
+     - Build component for `rhdr-volsync-plugin-mover` (if needed as separate image)
+   - Pipeline must produce container images for each
+
+3. **Add to Component List in FBC (MR 3):**
+   - Update `rhdr-fbc` (File-Based Catalog) to include volsync operator
+   - Ensures volsync appears in OperatorHub
+
+4. **Add Repositories to Pyxis Product Definition (MR 2):**
+   - Add to `products/rhdr/rhdr.yaml`:
+     ```yaml
+     - image_type: "Operator Controller"
+       repository: "rhdr/rhdr-volsync-plugin-operator"
+     - image_type: "Operator Bundle Image"
+       repository: "rhdr/rhdr-volsync-plugin-operator-bundle"
+     # Layered image (if separate build artifact):
+     - image_type: "Layered"
+       repository: "rhdr/rhdr-volsync-plugin-mover"
+     ```
+
+**If Volsync is NOT Part of Build:**
+- Volsync can remain excluded from RHDR release
+- Skip all the steps above
+- Proceed with 8-repository approach
+
+**Action Required:**
+Please verify volsync component status and update this section once confirmed.
+
+---
+
+## Appendix: Product EngID vs Team ID
+
+### Key Distinction
+
+These are **two different identifiers** used in different configuration files:
+
+| Identifier | Value | Configuration File | Field | Status |
+|------------|-------|-------------------|-------|--------|
+| **Product EngID** | `1119` | **RPA** (config/) | `data.releaseNotes.product_id: [1119]` | ✓ Confirmed |
+| **Team ID** | TBD | **Pyxis Product Def** (products/) | `team_id: "..."` | ⏳ Pending |
+
+### Product EngID: 1119 ✓
+
+- **RHDR product identifier** (confirmed)
+- **Goes in:** RPA file at `config/stone-prd-rh01.pg1f.p1/product/ReleasePlanAdmission/rhdr/rhdr-*-prod.yaml`
+  ```yaml
+  data:
+    releaseNotes:
+      product_id: [1119]  # ← Use array format
+      product_name: "Red Hat Disaster Recovery"
+      product_version: "4.22"
+  ```
+- Used for:
+  - Release service product tracking
+  - Advisory generation
+  - Release notes correlation
+  - Product mapping in Konflux
+- This is the same as "EngID" mentioned in team communications
+
+### Team ID: Pending from PMM
+
+- **RHDR team identifier** (separate from product ID)
+- **Goes in:** Pyxis product definition at `products/rhdr/rhdr.yaml`
+  ```yaml
+  .repo_template: &repo_template
+    team_id: "00000000-0000-0000-0000-000000000000"  # ← Replace with actual Team ID
+  ```
+- Used for:
+  - `team_id` field in Pyxis product definition
+  - Team role assignments in Cicada
+  - Release service team permissions
+- Must be obtained from your Product Manager or PMM
+- Format: UUID (e.g., `5cdc8481d70cc57c44b2888d`)
+- Different teams may work on the same product; this identifies YOUR team specifically
+
+### Why They're Different
+
+- **Product EngID (1119)** = What product this is (Red Hat Disaster Recovery)
+  - Everyone working on RHDR uses the same EngID
+  - Used for release tracking and advisory correlation
+  
+- **Team ID** = Which team owns/manages this product (your specific team)
+  - Different teams may have different Team IDs
+  - Used for role-based access control and permissions
+
+### Configuration Files Summary
+
+**File 1: Pyxis Product Definition** (`products/rhdr/rhdr.yaml`)
+- Contains: `team_id: "..."` (pending from PMM)
+- Does NOT contain: Product EngID (1119)
+
+**File 2: RPA (ReleasePlanAdmission)** (`config/.../ReleasePlanAdmission/rhdr/rhdr-*-prod.yaml`)
+- Contains: `product_id: [1119]` (confirmed)
+- Does NOT contain: Team ID
+
+**File 3: Tenant Configuration** (`tenants-config/.../rhdr-tenant/`)
+- Contains: Neither (not used in tenant configs)
+- Focuses on: Application, Component, and ReleasePlan definitions
+
+### Action Required
+
+**For EngID (1119):**
+- ✓ Ready to use in RPA files
+- Add to `data.releaseNotes.product_id: [1119]` in every RPA
+
+**For Team ID:**
+- ⏳ Contact your Product Manager or PMM to obtain
+- Update Pyxis product definition's `team_id` field once received

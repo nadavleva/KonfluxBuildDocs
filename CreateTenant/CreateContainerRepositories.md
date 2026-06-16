@@ -1181,6 +1181,302 @@ You don't need to define all repositories or metadata at once. Follow this itera
 
 ---
 
+## Step 3: Validate Container Repositories Exist in Pyxis
+
+Before creating the RPA or attempting a release, validate that your container repositories have been successfully created in Pyxis. This prevents pipeline failures later.
+
+### Overview: Two Registry Environments
+
+Container repositories exist in **two separate Pyxis environments**:
+
+| Environment | Registry | Timeline | Purpose |
+|-----------|----------|----------|---------|
+| **Production** | `registry.redhat.io` | Created immediately upon MR merge | Customer-facing releases |
+| **Staging** | `registry.stage.redhat.io` | ~24 hours after production | Pre-release validation and testing |
+
+Both environments must have the repositories before the release service can push images. Check both environments to ensure they're ready.
+
+### Validation Method: Pyxis API Query
+
+Query the Pyxis API directly using `curl` with Kerberos authentication to check if repositories exist:
+
+#### Production Pyxis (registry.redhat.io)
+
+```bash
+# Template command
+curl --negotiate -u: \
+  "https://pyxis.engineering.redhat.com/v1/repositories/registry/registry.access.redhat.com/repository/{REPOSITORY_PATH}"
+
+# Example: Check if rhdr-hub-operator exists
+curl --negotiate -u: \
+  "https://pyxis.engineering.redhat.com/v1/repositories/registry/registry.access.redhat.com/repository/rhdr/rhdr-hub-operator" | jq .
+
+# With pretty-print and error handling
+curl --negotiate -u: -f \
+  "https://pyxis.engineering.redhat.com/v1/repositories/registry/registry.access.redhat.com/repository/rhdr/rhdr-hub-operator" 2>/dev/null | jq . || echo "Repository not found or error"
+```
+
+#### Staging Pyxis (registry.stage.redhat.io)
+
+```bash
+# Template command
+curl --negotiate -u: \
+  "https://pyxis.stage.engineering.redhat.com/v1/repositories/registry/registry.access.redhat.com/repository/{REPOSITORY_PATH}"
+
+# Example: Check if rhdr-hub-operator exists in staging
+curl --negotiate -u: \
+  "https://pyxis.stage.engineering.redhat.com/v1/repositories/registry/registry.access.redhat.com/repository/rhdr/rhdr-hub-operator" | jq .
+```
+
+#### Understanding API Response
+
+**Success Response (Repository Exists):**
+```json
+{
+  "repository_id": "5f8d3c9e7b2a1c4d",
+  "repository": "rhdr/rhdr-hub-operator",
+  "registry_id": "r1234567890",
+  "enabled": true,
+  "build_categories": ["Operator image"],
+  "release_categories": ["Tech Preview"],
+  "vendor_label": "redhat",
+  "created_at": "2026-06-14T10:30:00Z"
+}
+```
+
+**Repository Not Found (404):**
+```json
+{
+  "error": "Not found"
+}
+```
+
+### Quick Validation Script
+
+Use this bash script to validate multiple RHDR repositories at once:
+
+```bash
+#!/bin/bash
+# validate_rhdr_repos.sh - Check RHDR repositories in both Pyxis environments
+
+set -e
+
+REPOS=(
+  "rhdr/rhdr-hub-operator"
+  "rhdr/rhdr-hub-operator-bundle"
+  "rhdr/rhdr-cluster-operator"
+  "rhdr/rhdr-cluster-operator-bundle"
+  "rhdr/rhdr-multicluster-operator"
+  "rhdr/rhdr-multicluster-operator-bundle"
+  "rhdr/rhdr-csi-addons-operator"
+  "rhdr/rhdr-csi-addons-operator-bundle"
+)
+
+PYXIS_PROD="https://pyxis.engineering.redhat.com/v1/repositories/registry/registry.access.redhat.com/repository"
+PYXIS_STAGE="https://pyxis.stage.engineering.redhat.com/v1/repositories/registry/registry.access.redhat.com/repository"
+
+echo "=== Validating RHDR Repositories ==="
+echo ""
+
+validate_repo() {
+  local env=$1
+  local url=$2
+  local repo=$3
+  
+  echo -n "[$env] $repo: "
+  
+  if curl --negotiate -u: -s -f "$url/$repo" > /dev/null 2>&1; then
+    echo "✓ EXISTS"
+    return 0
+  else
+    echo "✗ NOT FOUND"
+    return 1
+  fi
+}
+
+echo "--- Production (registry.redhat.io) ---"
+prod_count=0
+for repo in "${REPOS[@]}"; do
+  validate_repo "PROD" "$PYXIS_PROD" "$repo" && ((prod_count++))
+done
+echo "Production: $prod_count/${#REPOS[@]} repositories found"
+echo ""
+
+echo "--- Staging (registry.stage.redhat.io) ---"
+stage_count=0
+for repo in "${REPOS[@]}"; do
+  validate_repo "STAGE" "$PYXIS_STAGE" "$repo" && ((stage_count++))
+done
+echo "Staging: $stage_count/${#REPOS[@]} repositories found"
+echo ""
+
+if [ $prod_count -eq ${#REPOS[@]} ]; then
+  echo "✓ Production repositories ready"
+else
+  echo "⚠ Production: Waiting for $((${#REPOS[@]} - prod_count)) repositories"
+fi
+
+if [ $stage_count -eq ${#REPOS[@]} ]; then
+  echo "✓ Staging repositories ready"
+else
+  echo "⚠ Staging: Waiting for $((${#REPOS[@]} - stage_count)) repositories (~24 hours)"
+fi
+```
+
+**Usage:**
+```bash
+chmod +x validate_rhdr_repos.sh
+./validate_rhdr_repos.sh
+```
+
+### RHDR Repository Validation Mapping
+
+Below is a complete mapping of all RHDR repositories from your `rhdr.yaml` and how to validate each one:
+
+#### Layer 1: Core Hub & Cluster Operators
+
+| Repository | YAML Path | Production Check | Staging Check |
+|-----------|-----------|------------------|---------------|
+| **rhdr-hub-operator** | `repositories[0].repository` | `curl ... /rhdr/rhdr-hub-operator` | Same (staging domain) |
+| **rhdr-hub-operator-bundle** | `repositories[1].repository` | `curl ... /rhdr/rhdr-hub-operator-bundle` | Same |
+| **rhdr-cluster-operator** | `repositories[2].repository` | `curl ... /rhdr/rhdr-cluster-operator` | Same |
+| **rhdr-cluster-operator-bundle** | `repositories[3].repository` | `curl ... /rhdr/rhdr-cluster-operator-bundle` | Same |
+
+#### Layer 2: Multicluster Operators
+
+| Repository | YAML Path | Production Check | Staging Check |
+|-----------|-----------|------------------|---------------|
+| **rhdr-multicluster-operator** | `repositories[4].repository` | `curl ... /rhdr/rhdr-multicluster-operator` | Same (staging domain) |
+| **rhdr-multicluster-operator-bundle** | `repositories[5].repository` | `curl ... /rhdr/rhdr-multicluster-operator-bundle` | Same |
+
+#### Layer 3: CSI Addons Operators
+
+| Repository | YAML Path | Production Check | Staging Check |
+|-----------|-----------|------------------|---------------|
+| **rhdr-csi-addons-operator** | `repositories[6].repository` | `curl ... /rhdr/rhdr-csi-addons-operator` | Same (staging domain) |
+| **rhdr-csi-addons-operator-bundle** | `repositories[7].repository` | `curl ... /rhdr/rhdr-csi-addons-operator-bundle` | Same |
+
+#### Layer 4: Volsync Plugin Operators (Pending MR 2)
+
+| Repository | YAML Path | Production Check | Staging Check |
+|-----------|-----------|------------------|---------------|
+| **rhdr-volsync-plugin-operator** ⏳ | `repositories[8].repository` | `curl ... /rhdr/rhdr-volsync-plugin-operator` | Same (staging domain) |
+| **rhdr-volsync-plugin-operator-bundle** ⏳ | `repositories[9].repository` | `curl ... /rhdr/rhdr-volsync-plugin-operator-bundle` | Same |
+
+### Validation Workflow
+
+**Recommended validation sequence:**
+
+#### Step 1: Verify Production Pyxis (immediately after MR merges)
+
+After your `pyxis-repo-configs` MR is **merged and Cicada pipeline completes**:
+
+```bash
+# Check one repository from each layer
+curl --negotiate -u: \
+  "https://pyxis.engineering.redhat.com/v1/repositories/registry/registry.access.redhat.com/repository/rhdr/rhdr-hub-operator" | jq '.repository'
+
+# Expected output:
+# "rhdr/rhdr-hub-operator"
+```
+
+**Success criteria:**
+- API returns 200 (not 404)
+- JSON response includes `repository_id` and `enabled: true`
+
+#### Step 2: Wait for Staging Sync (~24 hours)
+
+Staging repositories auto-sync from production with a ~24-hour delay. You can:
+- Wait and periodically check, OR
+- Use the validation script above to monitor both environments
+
+```bash
+# Check every 6 hours (optional - you don't need to do this manually)
+for i in {1..4}; do
+  echo "Check $i: $(date)"
+  ./validate_rhdr_repos.sh
+  [ $i -lt 4 ] && sleep 6h
+done
+```
+
+#### Step 3: Verify Staging Pyxis (after ~24 hours)
+
+Once staging repositories appear:
+
+```bash
+# Check one repository from staging
+curl --negotiate -u: \
+  "https://pyxis.stage.engineering.redhat.com/v1/repositories/registry/registry.access.redhat.com/repository/rhdr/rhdr-hub-operator" | jq '.repository'
+
+# Expected output:
+# "rhdr/rhdr-hub-operator"
+```
+
+**Success criteria:**
+- All 8 repositories (or your MR 1 subset) appear in both production and staging
+- Both registries now ready to receive releases
+
+#### Step 4: Proceed with RPA Creation
+
+Once validation confirms repositories in both environments:
+
+```bash
+# Now safe to create RPAs pointing to these repositories
+# Production RPA: registry.redhat.io/rhdr/...
+# Staging RPA: registry.stage.redhat.io/rhdr/...
+```
+
+### Common Validation Issues
+
+#### Issue: "Repository Not Found (404)"
+
+**Cause:** Repository hasn't been created yet, or MR not merged.
+
+**Debug:**
+```bash
+# 1. Verify MR is merged
+git log --oneline origin/main | grep -i rhdr
+
+# 2. Check Cicada pipeline status
+# Visit: https://gitlab.cee.redhat.com/releng/pyxis-repo-configs/-/pipelines
+
+# 3. Verify repository path matches YAML
+# In rhdr.yaml, check the 'repository' field value
+# Should match curl path exactly (e.g., "rhdr/rhdr-hub-operator")
+```
+
+#### Issue: "Production Exists, But Staging Missing"
+
+**Cause:** Normal ~24-hour sync delay (not an error).
+
+**Solution:**
+- Wait additional time (sync happens once daily)
+- Monitor using the validation script
+- Check staging after 24-48 hours
+
+#### Issue: "Curl Authentication Failed"
+
+**Cause:** Missing Kerberos credentials or not authenticated to Red Hat network.
+
+**Solution:**
+```bash
+# Ensure you have a valid Kerberos ticket
+kinit USERNAME@REDHAT.COM
+
+# Or if you have RHEL workstation with auto-auth
+# Try again from a Red Hat network-connected machine
+```
+
+### What To Do If Validation Fails
+
+| Scenario | Action | Timeline |
+|----------|--------|----------|
+| **MR just merged, prod repos not found** | Check Cicada pipeline status; wait for pipeline completion | Minutes-hours |
+| **Production exists, staging missing** | Wait for ~24-hour sync window | ~24 hours normal |
+| **Both missing after 48+ hours** | Contact Release Engineering; check for MR merge errors | Next business day |
+
+---
+
 ## Summary: Questions Resolution Status
 
 This section documents the resolution of all open questions for RHDR container repository creation.

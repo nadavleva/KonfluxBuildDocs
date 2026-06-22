@@ -1,11 +1,11 @@
 # RHDR Release Configuration: RPA, Constraints, and ReleasePlan
 
-**Document version:** 1.2  
+**Document version:** 1.3  
 **Date:** 2026-06-04  
 **Konflux tenant:** `rhdr-tenant` (cluster `stone-prod-p02`)  
 **Application (4.22):** `rhdr-4-22`  
 **Related JIRA:** [VIRTDR-141](https://redhat.atlassian.net/browse/VIRTDR-141)  
-**Companion docs:** [ConstraintFileStages.md](./ConstraintFileStages.md), [CreateRHDRFBCApplication.md](./CreateRHDRFBCApplication.md), [RHDRCatalog.md](./RHDRCatalog.md)
+**Companion docs:** [ConstraintFileStages.md](./ConstraintFileStages.md), [CreateRHDRFBCApplication.md](./CreateRHDRFBCApplication.md), [RHDRCatalog.md](./RHDRCatalog.md), **[RHDRReleasePlanAndAdmissionImplementation.md](./RHDRReleasePlanAndAdmissionImplementation.md)** (MR2 implementation guide: RP/RPA/EC, stage vs prod split)
 
 ---
 
@@ -155,8 +155,9 @@ To release RHDR 4.22 (and later FBC), you need **three releng layers** plus **te
 
 | MR | Contents | Status |
 |----|----------|--------|
-| **MR1** | `constraints/product/rhdr.yaml` + CODEOWNERS | Ready for review |
-| **MR2** | EC policies, `rhdr-4-22` stage/prod RPAs, ReleasePlans | After MR1 merges |
+| **MR1** | `constraints/product/rhdr.yaml` + CODEOWNERS | Merged ([!!18701](https://gitlab.cee.redhat.com/releng/konflux-release-data/-/merge_requests/18701)) |
+| **MR2** | EC policies, `rhdr-4-22` **stage** RPA + ReleasePlan, `prodsec/rhdr.yaml` (template only) | In progress — **prod RPA deferred to MR2b** (after ProdSec stream registration) |
+| **MR2b** | `rhdr-4-22-prod.yaml` + prod `ReleasePlan` | After stream `red-hat-disaster-recovery-4.22` exists in product-definitions |
 
 **Prerequisite (parallel):** [releng/pyxis-repo-configs](https://gitlab.cee.redhat.com/releng/pyxis-repo-configs) MR to create product and `rhdr/*` container repositories on **staging** and **production** registries (template: `products/rhodf/rhodf.yaml`). Required before the first release push, not for MR1.
 
@@ -281,9 +282,56 @@ See also [Clarifications §2](#2-where-are-registry-rhdr-stage--registry-rhdr-pr
 
 **CODEOWNERS:** add paths under `config/stone-prod-p02.hjvn.p1/product/EnterpriseContractPolicy/` for new policy files.
 
-### 2.3 Prodsec and `product_id` (see [Clarifications §1](#1-where-is-product_id-required-and-can-it-change-later))
+### 2.3 ProdSec stream registration (required for prod RPA)
 
-rhodf RPAs use `product_id: [547]`; rhwa uses `[697]`. RHDR RPAs may ship with **interim** `[697]` or `[1]` plus a TODO comment until PMM assigns the permanent eng-id (see [interim `product_id`](#interim-product_id-for-rhdr-rpas-until-permanent-eng-id)). Optional `prodsec/` YAML may be added later — coordinate with prodsec if `tox -e integration` is required in CI.
+RHDR uses **product_id `[1119]`** (RELENG-351) in stage and prod RPAs. That is separate from ProdSec **stream** and **CPE** registration, which the `integration` CI job validates for **production** RPAs only.
+
+| Artifact | Path | Owner in CODEOWNERS | CI env |
+|----------|------|---------------------|--------|
+| ProdSec template | `prodsec/rhdr.yaml` | `/prodsec/` → `@jperezde @teagle` | `tox -e integration` (`test_stream_names_are_in_prodsec_repo`) |
+| Prod RPA | `.../ReleasePlanAdmission/rhdr/rhdr-4-22-prod.yaml` | `/config/.../ReleasePlanAdmission/rhdr/` → `@nlevanon @eduffy` | same (renders template via `origin: rhdr-tenant` → `prodsec/rhdr.yaml`) |
+| Stage RPA | `.../rhdr-4-22-stage.yaml` | same | **skipped** by integration (staging intention) |
+
+**Current template** (must match [product-definitions](https://gitlab.cee.redhat.com/prodsec/product-definitions/) exactly):
+
+```yaml
+stream: red-hat-disaster-recovery-{.spec.data.releaseNotes.product_version | split(".") | .[0] + "." + .[1]}
+cpe: cpe:/a:redhat:red_hat_disaster_recovery:{.spec.data.releaseNotes.product_version | split(".") | .[0] + "." + .[1]}::el9
+```
+
+For `product_version: "4.22"` this renders **`red-hat-disaster-recovery-4.22`**. That stream is **not registered** in ProdSec product-definitions yet (CI failure on MR2 integration). Do **not** reuse `openshift-data-foundation-4.22` (ODF / product 547) — RHDR is eng-id **1119**.
+
+#### Action item — register RHDR with Product Security (before prod RPA can merge)
+
+- [ ] **Open request** in **#wg-cpe-assignments** (or via your ProdSec architect). CC if urgent: Thomas Eagle (`teagle`), Juan Perez de Algaba (`jperezde`).
+- [ ] **Ask ProdSec** to add stream + CPE to [prodsec/product-definitions](https://gitlab.cee.redhat.com/prodsec/product-definitions/) for:
+  - **Product:** Red Hat Disaster Recovery
+  - **EngID:** `1119`
+  - **Version stream:** `4.22` (initial)
+  - **Proposed stream name:** `red-hat-disaster-recovery-4.22` (confirm or correct with ProdSec)
+  - **Proposed CPE:** `cpe:/a:redhat:red_hat_disaster_recovery:4.22::el9`
+- [ ] **After ProdSec merges** their MR, verify locally (on VPN):
+
+  ```bash
+  curl -fsSL https://prodsec.pages.redhat.com/product-definitions/products.json \
+    | jq -r '.ps_update_streams | keys[]' | rg '^red-hat-disaster-recovery-4\.22'
+  ```
+
+- [ ] **If ProdSec assigns different names**, update `prodsec/rhdr.yaml` in konflux-release-data to match, then re-run `tox -e integration`.
+- [ ] **Re-run MR pipeline** — `integration` must pass on `rhdr-4-22-prod.yaml`.
+
+**Reference (working pattern):** rhodf `prodsec/rhodf.yaml` → stream `openshift-data-foundation-4.22` exists in product-definitions; RHDR needs the same registration for its own stream.
+
+#### Split-MR strategy (MR2 vs MR2b)
+
+| MR | Remove / include | `integration` | `test` (`test_release_notes_required_fields`) |
+|----|------------------|---------------|---------------------------------------------|
+| **MR2 (now)** | Stage RPA + **keep** `prodsec/rhdr.yaml`; **no** prod RPA, **no** prod `ReleasePlan` | Passes (no prod RPA → stream test skipped) | Passes (prodsec file required for stage RPA on `rh-advisories`) |
+| **MR2b (later)** | Add `rhdr-4-22-prod.yaml` + prod `ReleasePlan` after ProdSec registers stream | Must pass stream lookup | unchanged |
+
+Do **not** delete `prodsec/rhdr.yaml` in MR2 — stage-only still fails `tox -e test` without it.
+
+See also [Clarifications §1](#1-where-is-product_id-required-and-can-it-change-later) for `product_id` vs prodsec stream.
 
 ---
 
@@ -474,7 +522,8 @@ Collect before filing the konflux-release-data MR:
 
 | # | Question | Used in |
 |---|----------|---------|
-| 1 | Official **product name** (use RHDR name now); **product_id** — interim `[697]` or `[1]` with TODO until permanent eng-id from PMM | RPA `releaseNotes`, prodsec |
+| 1 | Official **product name**; **product_id** `[1119]` (RELENG-351) | RPA `releaseNotes` |
+| 1b | **ProdSec stream + CPE** registered in [product-definitions](https://gitlab.cee.redhat.com/prodsec/product-definitions/) (see [§2.3](#23-prodsec-stream-registration-required-for-prod-rpa)) | `prodsec/rhdr.yaml`, `tox -e integration` |
 | 2 | **registry.redhat.io** namespace and image names per component | Constraints URL pattern, RPA `mapping` |
 | 3 | Confirm **4.22** is the only stream initially | File names `rhdr-4-22-*` |
 | 4 | Will RHDR ship **FBC** to redhat-operator-index? If yes, OCP versions (4.14–4.23?) | FBC RPA + constraints `fbc` block |
@@ -486,16 +535,74 @@ Collect before filing the konflux-release-data MR:
 
 ## Part 7: MR checklist (konflux-release-data)
 
+### How to commit MR2 (ReleasePlan + RPA + EC + prodsec)
+
+Work on branch `rhdr-release-plan2` (rebased on `main` after MR1). **Do not** include `.agent.md`, `.github/`, or other unrelated untracked files.
+
+**1. Generate tenant ReleasePlan manifests** (after editing `rhdr-4-22-release-plans.yaml` and `kustomization.yaml`):
+
+```bash
+cd /path/to/konflux-release-data/tenants-config
+./build-single.sh rhdr-tenant
+```
+
+**2. Stage only MR2 paths:**
+
+```bash
+cd /path/to/konflux-release-data
+git add \
+  CODEOWNERS \
+  prodsec/rhdr.yaml \
+  config/stone-prod-p02.hjvn.p1/product/EnterpriseContractPolicy/registry-rhdr-stage.yaml \
+  config/stone-prod-p02.hjvn.p1/product/EnterpriseContractPolicy/registry-rhdr-prod.yaml \
+  config/stone-prod-p02.hjvn.p1/product/ReleasePlanAdmission/rhdr/ \
+  tenants-config/cluster/stone-prod-p02/tenants/rhdr-tenant/rhdr-4-22-release-plans.yaml \
+  tenants-config/cluster/stone-prod-p02/tenants/rhdr-tenant/kustomization.yaml \
+  tenants-config/auto-generated/cluster/stone-prod-p02/tenants/rhdr-tenant/appstudio.redhat.com_v1alpha1_releaseplan_rhdr-4-22-releaseplan-*.yaml
+```
+
+| You say | Konflux resource | Files in this MR |
+|---------|------------------|------------------|
+| **RP** | `ReleasePlan` (tenant) | `rhdr-4-22-release-plans.yaml` + `auto-generated/...releaseplan-*.yaml` |
+| **RPA** | `ReleasePlanAdmission` (releng) | `config/.../ReleasePlanAdmission/rhdr/rhdr-4-22-stage.yaml`, `rhdr-4-22-prod.yaml` |
+| **EC** | `EnterpriseContractPolicy` | `registry-rhdr-stage.yaml`, `registry-rhdr-prod.yaml` |
+
+**3. Validate** (commit first so MR-scoped tests and `verify-manifests.sh` see a clean tree):
+
+```bash
+git fetch origin main
+export CI_MERGE_REQUEST_TARGET_BRANCH_NAME=main
+export CI_COMMIT_SHA=$(git rev-parse HEAD)
+tox -e test -e tenants-config-test -e codeowners-lint
+# integration (needs VPN): tox -e integration
+```
+
+**4. Commit and push:**
+
+```bash
+git commit -m "$(cat <<'EOF'
+Add RHDR 4.22 release config: RP, RPA, EC policies, prodsec template.
+
+EOF
+)"
+git push -u origin rhdr-release-plan2
+```
+
+Follow-up commits on the same branch: edit files → `build-single.sh rhdr-tenant` if tenant YAML changed → `git add` same paths → commit → push.
+
 ### Phase A — Enable releases for 4.22 containers
 
-- [ ] `constraints/product/rhdr.yaml`
-- [ ] `registry-rhdr-stage.yaml`, `registry-rhdr-prod.yaml`
-- [ ] `ReleasePlanAdmission/rhdr/rhdr-4-22-stage.yaml` — `product_id: [697]` or `[1]` + TODO comment re permanent eng-id
-- [ ] `ReleasePlanAdmission/rhdr/rhdr-4-22-prod.yaml` — same `product_id` as stage
-- [ ] `tenants-config/.../rhdr-tenant/` — ReleasePlan YAML + kustomization
-- [ ] CODEOWNERS for constraints, config/rhdr, EC policies
-- [ ] `build-manifests.sh` / `build-single.sh` + commit `auto-generated/`
-- [ ] `tox` green
+- [x] `constraints/product/rhdr.yaml` (MR1)
+- [x] `registry-rhdr-stage.yaml`, `registry-rhdr-prod.yaml`
+- [x] `ReleasePlanAdmission/rhdr/rhdr-4-22-stage.yaml` — `product_id: [1119]`
+- [ ] `ReleasePlanAdmission/rhdr/rhdr-4-22-prod.yaml` — **MR2b** (after ProdSec stream registration)
+- [x] `prodsec/rhdr.yaml` — **keep in MR2** (required by `test` for stage RPA; does **not** run stream validation until prod RPA exists)
+- [x] `tenants-config/.../rhdr-tenant/` — ReleasePlan YAML + kustomization + `auto-generated/`
+- [x] CODEOWNERS for config/rhdr EC + RPA (`@nlevanon @eduffy`; constraints remain releng-only)
+- [ ] **ProdSec:** stream `red-hat-disaster-recovery-4.22` registered in product-definitions (**integration blocker**)
+- [ ] `tox -e integration` green on MR (after ProdSec registration)
+- [x] `tox -e test`, `tox -e codeowners-lint` green
+- [ ] `tox -e tenants-config-test` green (requires committed tree; no stray untracked files in repo root)
 
 ### Phase B — FBC (after catalog component exists)
 
@@ -520,5 +627,6 @@ Collect before filing the konflux-release-data MR:
 
 ---
 
-**Status:** Draft v1.2 — registry namespace remains a blocker; `product_id` may use interim `[697]` (rhwa) or `[1]` with TODO until PMM assigns permanent eng-id; `registry-rhdr-*` policies must be created in `EnterpriseContractPolicy/`.  
-**Next step:** Confirm PMM/registry paths, then open konflux-release-data MR (constraints + EC policies + RPAs with interim `product_id` + ReleasePlans). Follow-up MR when permanent eng-id is known.
+**Status:** v1.3 — MR1 merged; MR2 stage-only on `rhdr-release-plan2` ([!19133](https://gitlab.cee.redhat.com/releng/konflux-release-data/-/merge_requests/19133)). **MR2b** adds prod RP/RPA after ProdSec stream registration.  
+**Implementation guide:** [RHDRReleasePlanAndAdmissionImplementation.md](./RHDRReleasePlanAndAdmissionImplementation.md)  
+**Next step:** Complete [ProdSec registration (§2.3)](#action-item--register-rhdr-with-product-security-before-prod-rpa-can-merge); remove `registry-rhdr-prod.yaml` from MR2 if still present (EC prod must ship with prod RPA).

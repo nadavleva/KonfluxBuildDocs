@@ -214,85 +214,310 @@ After Konflux builds complete, images end up in two possible places:
 
 This is the authoritative source for where your images actually are and exactly how to pull them.
 
-### Check Individual Image
+### Quick Batch Check - Verify Published Images
 
-**Inspect by tag (if available):**
+**Option 1: Extract from Multiple Releases (Recommended - Automatically Finds All Components)**
 
-```bash
-skopeo inspect docker://registry.stage.redhat.io/rhdr/rhdr-cluster-rhel9-operator:latest
-```
+**IMPORTANT:** You must be logged into `registry.stage.redhat.io` before running this script.
 
-**Inspect by digest:**
+Use the extraction script to automatically search through the last 10 successful releases and collect all components:
 
 ```bash
-# Get the digest from your release artifacts page, then:
-skopeo inspect docker://registry.stage.redhat.io/rhdr/rhdr-cluster-rhel9-operator@sha256:abc123def456...
+# Step 1: Log in to staging registry (REQUIRED)
+podman login registry.stage.redhat.io
+# Enter your terms-based registry service account credentials
+# See "Accessing the Staging Registry" section above for credential setup
+
+# Step 2: Make the script executable
+chmod +x extract-release-artifacts.sh
+
+# Step 3: Run the extraction (searches last 10 releases by default)
+./extract-release-artifacts.sh
+
+# Or search more releases if needed
+./extract-release-artifacts.sh rhdr-tenant 20
 ```
 
-### Quick Batch Check
-
-Use the provided validation script to check all RHDR images in staging:
-
-**After logging in with your credentials:**
-
-```bash
-# Make the script executable
-chmod +x validate_images.sh
-
-# Run the validation (uses your current podman login)
-./validate_images.sh
-```
-
-**Output includes:**
-- ✅/❌ Status for each component
-- Image size (GB/MB/KB)
-- Full pullspec and digest
-- Next steps for QE testing
+**What this script does:**
+- ✅ Queries Konflux Release objects directly (no registry access needed for lookup)
+- ✅ Searches last 10 successful releases (newest to oldest)
+- ✅ Takes the **latest version** if a component appears in multiple releases
+- ✅ Stops automatically once all 9 target components are found
+- ✅ Handles cases where components are spread across multiple release batches
+- ✅ Generates two output files automatically
 
 **Example output:**
 
 ```
-=== RHDR Staging Image Validation ===
+=== RHDR Release Artifacts Multi-Release Search ===
+Namespace: rhdr-tenant
+Searching last 10 successful releases...
 
-Registry: registry.stage.redhat.io
-Auth file: .docker/config.json
+Found releases to search:
+  [1] rhdr-4-22-20260629-062626-000-fd5504f-gt5g5 (created: 2026-06-29T06:26:08Z)
+  [2] rhdr-4-22-releaseplan-stagercr2p (created: 2026-06-25T19:22:08Z)
 
-Checking RHDR components...
+[Release 1/10] Processing: rhdr-4-22-20260629-062626-000-fd5504f-gt5g5 (3 images)
+  ✅ Found: rhdr-csi-addons-sidecar
+  ✅ Found: rhdr-ramen-operator-base-image
+  ✅ Found: rhdr-ramendr-console
 
-  rhdr-hub-rhel9-operator:                   ✅ found (650.5MB)
-     Pullspec: registry.stage.redhat.io/rhdr/rhdr-hub-rhel9-operator:latest
-     Digest:   sha256:abc123def456789...
-...
+✅ All 9 target components found!
 
-=== Summary ===
-Found:     8 / 8 images
-Not found: 0 / 8 images
+================================================================
+=== Generating Output Files ===
 
-✅ All RHDR components are present in staging!
+✅ Podman pull commands saved to:
+   /path/to/output/podman-pull-20260629-212803.sh
+
+✅ CatalogSource YAML saved to:
+   /path/to/output/catalogsource-20260629-212803.yaml
+
+=== Output Files Summary ===
+To use podman pull commands:
+  bash /path/to/output/podman-pull-20260629-212803.sh
+
+To apply CatalogSource:
+  kubectl apply -f /path/to/output/catalogsource-20260629-212803.yaml
+
+All output files are in: /path/to/output
+================================================================
 ```
 
-**If you need to use a specific auth file:**
+**Generated output files created in `./output/` directory:**
+
+1. **`podman-pull-TIMESTAMP.sh`** — Executable shell script for pulling all images
+   - Contains exact digest-based pullspecs for all 9 components
+   - Usage: `bash output/podman-pull-20260629-212803.sh`
+   - Can be shared with QE team for reproducible image pulls
+
+2. **`catalogsource-TIMESTAMP.yaml`** — Ready-to-apply Kubernetes manifest
+   - Contains CatalogSource with correct bundle image reference
+   - Includes commented section showing all 9 component digests  
+   - Usage: `kubectl apply -f output/catalogsource-20260629-212803.yaml`
+   - Timestamped for tracking different build versions
+
+**Option 2: Direct Registry Check (Advanced)**
+
+If you need to verify registry access directly without the script:
 
 ```bash
-./validate_images.sh ~/.rhdr-staging-auth.json
+# Step 1: Login with your terms-based registry credentials (REQUIRED)
+podman login registry.stage.redhat.io
+# Username: <service account username from https://access.stage.redhat.com/terms-based-registry/>
+# Password: <service account token>
+
+# Step 2: Try to pull one image
+podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle:v4.22
+
+# Or pull by exact digest (recommended for reproducibility)
+podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle@sha256:883cf79151bafbfc9931c08b75d542bd55879060425b695bba688f160ecff8bb
 ```
 
-**Or with the docker config from podman login:**
+**If you get authentication errors:**
+- **Must be logged in:** Verify you ran `podman login registry.stage.redhat.io` successfully
+- Verify credentials at: https://access.stage.redhat.com/terms-based-registry/
+- Regenerate service account token if expired (tokens have expiration dates)
+- Use `podman logout registry.stage.redhat.io` then `podman login` again with fresh credentials
+
+---
+
+## Pulling Images Locally
+
+Once authenticated, pull components:
 
 ```bash
-./validate_images.sh ~/.docker/config.json
+# Pull by tag (gets latest available)
+podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle:v4.22
+
+# Or by exact digest (recommended for reproducibility and testing)
+podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle@sha256:883cf79151bafbfc9931c08b75d542bd55879060425b695bba688f160ecff8bb
+
+# Pull all 9 components at once using script output
+bash output/podman-pull-20260629-212803.sh
 ```
 
-### Pull an Image
+---
 
-Once you've verified an image exists, pull it:
+## Deploying CatalogSource to OpenShift Cluster
+
+### Important: Cluster-Level Authentication Required
+
+**Yes, you need authentication when deploying to OCP** — even though you're logged in locally, the OpenShift cluster needs its own credentials to pull the bundle image from `registry.stage.redhat.io`.
+
+The cluster cannot use your local `podman login` credentials. You must create a Kubernetes ImagePullSecret.
+
+### Step 1: Create ImagePullSecret (Required)
 
 ```bash
-podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-rhel9-operator:latest
-
-# Or by digest:
-podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-rhel9-operator@sha256:abc123def456...
+# Create a secret with your staging registry credentials
+kubectl create secret docker-registry rhdr-staging-pull-secret \
+  --docker-server=registry.stage.redhat.io \
+  --docker-username=<your-service-account-username> \
+  --docker-password=<your-service-account-token> \
+  --docker-email=your-email@example.com \
+  -n openshift-marketplace
 ```
+
+### Step 2: Patch Service Account
+
+```bash
+# Patch the default service account to use this secret
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "rhdr-staging-pull-secret"}]}' \
+  -n openshift-marketplace
+```
+
+### Step 3: Apply CatalogSource
+
+```bash
+# Use the YAML file generated by extract-release-artifacts.sh
+kubectl apply -f output/catalogsource-20260629-212803.yaml
+
+# Or apply manually
+kubectl apply -f - <<EOF
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: rhdr-staging-catalog
+  namespace: openshift-marketplace
+spec:
+  sourceType: grpc
+  image: registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle@sha256:167306b35c8f37e9abcd3aa003a5b292d43f6216716b297755eb7de794e23b47
+EOF
+```
+
+### Step 4: Verify CatalogSource is Ready
+
+```bash
+# Check status
+kubectl get catalogsource -n openshift-marketplace
+
+# View detailed status (may take 1-2 minutes to become ready)
+kubectl describe catalogsource rhdr-staging-catalog -n openshift-marketplace
+
+# Watch for ready status
+kubectl get catalogsource rhdr-staging-catalog -n openshift-marketplace -w
+```
+
+### Troubleshooting CatalogSource Issues
+
+**If you see authentication errors in the status:**
+```bash
+# 1. Verify the secret was created
+kubectl get secrets -n openshift-marketplace | grep rhdr
+
+# 2. Verify the service account has the secret
+kubectl get serviceaccount default -n openshift-marketplace -o yaml | grep imagePullSecrets
+
+# 3. Check OLM logs for detailed errors
+kubectl logs -n openshift-operator-lifecycle-manager -l app=cataloger | grep rhdr
+
+# 4. Recreate the secret if needed
+kubectl delete secret rhdr-staging-pull-secret -n openshift-marketplace
+kubectl create secret docker-registry rhdr-staging-pull-secret \
+  --docker-server=registry.stage.redhat.io \
+  --docker-username=<your-service-account-username> \
+  --docker-password=<your-service-account-token> \
+  --docker-email=your-email@example.com \
+  -n openshift-marketplace
+```
+
+**If you see "image not found" errors:**
+- Verify the digest in the YAML matches current published images
+- Run `./extract-release-artifacts.sh` to regenerate with latest digests
+
+**If you see connection timeout errors:**
+- Check cluster can reach `registry.stage.redhat.io`
+- Corporate networks may require proxy configuration (see Network Setup section)
+- Check firewall rules permit egress to staging registry
+
+### Pull Images Locally
+
+Once you've verified you can authenticate, pull images:
+
+```bash
+# First, ensure you're logged in
+podman login registry.stage.redhat.io
+
+# Pull by tag (gets latest)
+podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle:v4.22
+
+# Or by exact digest (recommended for reproducibility and testing)
+podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle@sha256:883cf79151bafbfc9931c08b75d542bd55879060425b695bba688f160ecff8bb
+```
+
+Use the `extract-release-artifacts.sh` script output (`podman-pull-*.sh`) to pull all 9 components at once with exact digests:
+
+```bash
+bash output/podman-pull-20260629-212803.sh
+```
+
+---
+
+## Deploying to OpenShift Cluster
+
+### Authentication When Using CatalogSource in OCP
+
+**Important:** When applying the CatalogSource to an OpenShift cluster, **the cluster also needs credentials** to pull the bundle image. This is separate from your local `podman login` credentials.
+
+#### Option A: Create ImagePullSecret (Recommended)
+
+```bash
+# Step 1: Create a secret with your staging registry credentials
+kubectl create secret docker-registry rhdr-staging-pull-secret \
+  --docker-server=registry.stage.redhat.io \
+  --docker-username=<your-service-account-username> \
+  --docker-password=<your-service-account-token> \
+  --docker-email=your-email@example.com \
+  -n openshift-marketplace
+
+# Step 2: Patch the default service account to use this secret
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "rhdr-staging-pull-secret"}]}' \
+  -n openshift-marketplace
+
+# Step 3: Apply the CatalogSource
+kubectl apply -f output/catalogsource-20260629-212803.yaml
+```
+
+#### Option B: Use Existing Docker Config (if available)
+
+If your cluster already has `~/.docker/config.json` configured with staging credentials:
+
+```bash
+# Create a secret from your local docker config
+kubectl create secret generic docker-config \
+  --from-file=.dockerconfigjson=~/.docker/config.json \
+  --type=kubernetes.io/dockerconfigjson \
+  -n openshift-marketplace
+
+# Patch service account
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "docker-config"}]}' \
+  -n openshift-marketplace
+
+# Apply CatalogSource
+kubectl apply -f output/catalogsource-20260629-212803.yaml
+```
+
+#### Verify CatalogSource is Ready
+
+```bash
+# Check status
+kubectl get catalogsource -n openshift-marketplace
+
+# View detailed status
+kubectl describe catalogsource rhdr-staging-catalog -n openshift-marketplace
+
+# View logs if there are issues
+kubectl logs -n openshift-operator-lifecycle-manager -l app=cataloger | grep rhdr
+```
+
+**Troubleshooting CatalogSource failures:**
+- If status shows authentication errors: ensure ImagePullSecret is created and service account is patched
+- If image cannot be found: verify the digest in the YAML matches current published images
+- If connection timeout: check cluster can reach `registry.stage.redhat.io` (may need proxy configuration for corporate networks)
 
 ---
 
@@ -577,6 +802,46 @@ After your staging release pipeline completes:
 
 ## Troubleshooting
 
+### Image Verification Script Fails with Authentication Error
+
+**Problem:** `validate-images.sh` fails with:
+```
+Error parsing image name: unable to retrieve auth token: invalid username/password
+```
+
+**Root Cause:** The script uses `skopeo` which sometimes has issues with authentication tokens even when credentials are valid.
+
+**Solution:** Use the simpler `verify-latest-release.sh` script instead:
+
+```bash
+./verify-latest-release.sh
+```
+
+This script:
+- ✅ Reads directly from Konflux Release objects (no registry auth needed)
+- ✅ Shows which components are published
+- ✅ Shows which components were built but not published
+- ✅ Provides exact pullspecs for QE
+- ✅ Works offline (uses kubectl, not registry)
+- ✅ Explains why components might be missing
+
+**Why use this instead:**
+- No credential validation/renewal needed
+- More reliable (talks to Konflux, not the registry)
+- Shows the authoritative source of truth
+
+**If you still need to verify registry access directly:**
+
+After successfully logging in with `podman login`:
+```bash
+# Try pulling an image directly (simpler than skopeo)
+podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle:v4.22
+```
+
+If this succeeds, images are accessible. If it fails with "unauthorized", your credentials may be expired or the image may not be published yet.
+
+---
+
 ### "Preprod Lockdown: Access Denied" When Accessing Terms-Based Registry
 
 **Cause:** Your browser isn't routing through the Red Hat internal proxy.
@@ -616,39 +881,44 @@ If still failing, check ServiceNow KB0006375 for detailed proxy setup.
 **What it means:**
 - Your service account has **WRITE-only** (push/upload) permissions
 - It does NOT have **READ** permissions on the RHDR namespace
-- The images likely exist (built on Thursday), but you can't view them
+- The images likely exist (built successfully), but you can't view them
 
-**Solution - Option 1: Create a New Service Account with Read Access**
+**Solution - Use Script That Doesn't Require Registry Auth:**
 
-1. Visit: `https://access.stage.redhat.com/terms-based-registry/#/`
-2. Create a **new service account** specifically for reading/pulling images
-   - Note the name clearly, e.g., `rhdr-staging-pull-access`
-3. Use the new credentials:
+Instead of attempting registry access validation, use the provided extraction scripts that work with Konflux objects directly (no registry auth needed):
+
+```bash
+# Searches multiple releases automatically (recommended)
+./extract-release-artifacts.sh rhdr-tenant
+
+# Or verify just the latest release
+./verify-latest-release.sh
+```
+
+These scripts:
+- ✅ Don't require registry credentials
+- ✅ Work offline (query Konflux, not registry)
+- ✅ Show authoritative build/publish status
+- ✅ Provide pullspecs for QE
+
+**If you still want to verify registry read access directly:**
+
+1. Create a **new service account** with READ access:
+   - Visit: `https://access.stage.redhat.com/terms-based-registry/#/`
+   - Create new account specifically for pulling images
+   
+2. Re-authenticate:
    ```bash
    podman logout registry.stage.redhat.io
    podman login registry.stage.redhat.io
-   # Use new credentials
+   # Use new read-access credentials
    
-   # Update auth file
-   cat > ~/.rhdr-staging-auth-pull.json <<EOF
-   {
-     "auths": {
-       "registry.stage.redhat.io": {
-         "username": "<new-read-service-account>",
-         "password": "<new-token>"
-       }
-     }
-   }
-   EOF
-   
-   ./validate-images.sh ~/.rhdr-staging-auth-pull.json
+   # Test pulling one image
+   podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle:v4.22
    ```
 
-**Solution - Option 2: Request Read Access for Current Account**
-
-- Contact your Platform Engineer or registry admin to grant read access to your existing service account
-
-**Solution - Option 3: Check Konflux Console Directly**
+**Or request read access:**
+- Contact your Platform Engineer to grant read permissions to your existing service account
 
 Even without registry read access, you can see published images:
 1. Log into Konflux console

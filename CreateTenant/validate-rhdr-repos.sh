@@ -46,6 +46,9 @@ RHDR_REPOS=(
   "rhdr/rhdr-multicluster-operator-bundle"
   "rhdr/rhdr-csi-addons-rhel9-operator"
   "rhdr/rhdr-csi-addons-operator-bundle"
+  "rhdr/rhdr-csi-addons-sidecar-rhel9"
+  "rhdr/rhdr-ramen-operator-base-image-rhel9"
+  "rhdr/rhdr-ramendr-console-rhel9"
 )
 
 RHODF_REPOS=(
@@ -154,6 +157,11 @@ RHDR REPOSITORIES:
 
   Layer 3 (CSI Addons):
     - rhdr/rhdr-csi-addons-operator & rhdr/rhdr-csi-addons-operator-bundle
+
+  Layer 4 (Ramen Components):
+    - rhdr/rhdr-csi-addons-sidecar-rhel9
+    - rhdr/rhdr-ramen-operator-base-image-rhel9
+    - rhdr/rhdr-ramendr-console-rhel9
 
 RHODF REPOSITORIES:
   Container Storage Interface & Addons: 16 repositories (8 operators + 8 bundles)

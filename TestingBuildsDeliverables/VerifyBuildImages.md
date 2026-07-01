@@ -284,18 +284,128 @@ All output files are in: /path/to/output
 ================================================================
 ```
 
-**Generated output files created in `./output/` directory:**
+### Step 3: Use Generated Output Files
 
-1. **`podman-pull-TIMESTAMP.sh`** — Executable shell script for pulling all images
-   - Contains exact digest-based pullspecs for all 9 components
-   - Usage: `bash output/podman-pull-20260629-212803.sh`
-   - Can be shared with QE team for reproducible image pulls
+The script creates two timestamped files in `./output/`:
 
-2. **`catalogsource-TIMESTAMP.yaml`** — Ready-to-apply Kubernetes manifest
-   - Contains CatalogSource with correct bundle image reference
-   - Includes commented section showing all 9 component digests  
-   - Usage: `kubectl apply -f output/catalogsource-20260629-212803.yaml`
-   - Timestamped for tracking different build versions
+**A. Pull all components locally:**
+```bash
+bash output/podman-pull-20260629-212803.sh
+```
+
+**B. Deploy CatalogSource to OCP:**
+```bash
+# See cluster authentication section below
+kubectl apply -f output/catalogsource-20260629-212803.yaml
+```
+
+---
+
+## Option C: Mirror Images to Quay.io (Recommended for QE - Avoids Proxy/Auth Issues)
+
+The script can automatically **mirror all components to your quay.io registry**, eliminating proxy and authentication complexity for QE teams.
+
+### Enable Mirroring
+
+Run the extraction script with mirroring enabled:
+
+```bash
+# Requires skopeo installed: sudo dnf install skopeo (or brew install skopeo on macOS)
+# You must be logged in to BOTH staging and quay.io registries
+
+# Login to staging
+podman login registry.stage.redhat.io
+
+# Login to quay.io
+podman login quay.io
+
+# Run script with mirroring enabled
+./extract-release-artifacts.sh rhdr-tenant 10 true
+```
+
+**Parameters:**
+- Argument 1: `rhdr-tenant` (namespace - optional, defaults to rhdr-tenant)
+- Argument 2: `10` (number of releases to search - optional, defaults to 10)
+- Argument 3: `true` (enable mirroring - optional, defaults to false)
+
+### What Mirroring Does
+
+When enabled, the script:
+1. ✅ Extracts all components from staging (as usual)
+2. ✅ Uses `skopeo copy --all` to mirror each component to your quay.io organization
+3. ✅ Copies **all architectures** (amd64, arm64, s390x, ppc64le) in one operation
+4. ✅ Tags images as `:staging` for easy tracking
+5. ✅ Generates `mirrored-pull-TIMESTAMP.sh` with pull commands for the mirror
+6. ✅ Creates detailed `mirror-log-TIMESTAMP.txt` showing success/failures
+
+### Mirrored Images Location
+
+Your mirrored images will be at:
+```
+quay.io/openshift-virtualization-dr/rhdr-hub-operator-bundle:staging
+quay.io/openshift-virtualization-dr/rhdr-cluster-operator-bundle:staging
+quay.io/openshift-virtualization-dr/rhdr-multicluster-operator-bundle:staging
+quay.io/openshift-virtualization-dr/rhdr-multicluster-operator-image:staging
+quay.io/openshift-virtualization-dr/rhdr-csi-addons-operator:staging
+quay.io/openshift-virtualization-dr/rhdr-csi-addons-operator-bundle:staging
+quay.io/openshift-virtualization-dr/rhdr-csi-addons-sidecar:staging
+quay.io/openshift-virtualization-dr/rhdr-ramen-operator-base-image:staging
+quay.io/openshift-virtualization-dr/rhdr-ramendr-console:staging
+```
+
+### Use Mirrored Images for OCP (Simplest Setup)
+
+Once mirrored, QE teams can use these images without any authentication issues:
+
+```bash
+# Pull from mirror (no staging credentials needed)
+bash output/mirrored-pull-20260630-194525.sh
+
+# Or deploy operators using operator-sdk (no index image needed)
+operator-sdk run bundle \
+  quay.io/openshift-virtualization-dr/rhdr-hub-operator-bundle:staging \
+  -n <test-namespace>
+```
+
+**To use CatalogSource:** You must first build an index image from the mirrored bundles using `opm index add`, then point CatalogSource at the index image (not the bundle).
+
+### Mirroring Output Files
+
+Three files are created when mirroring is enabled:
+
+| File | Purpose |
+|------|---------|
+| `podman-pull-TIMESTAMP.sh` | Pull from staging (original, requires proxy/auth) |
+| `mirrored-pull-TIMESTAMP.sh` | Pull from quay.io mirror (no auth needed) |
+| `mirror-log-TIMESTAMP.txt` | Detailed mirror operation log |
+
+### Troubleshooting Mirroring
+
+**"skopeo not found" error:**
+```bash
+# Install skopeo
+sudo dnf install skopeo    # Fedora/RHEL
+brew install skopeo         # macOS
+```
+
+**"Not authenticated" error:**
+```bash
+# You must be logged into both registries
+podman login registry.stage.redhat.io
+podman login quay.io
+```
+
+**Partial mirror success:**
+- Check `mirror-log-*.txt` for details on failed images
+- Rerun the script to retry failed components
+- The log will show which components succeeded and which failed
+
+**Large image warning:**
+- First mirror of all 9 components may take 10-30 minutes depending on network
+- Subsequent runs will use cached data and be faster
+- You can cancel and resume by running the script again
+
+---
 
 **Option 2: Direct Registry Check (Advanced)**
 
@@ -368,13 +478,39 @@ kubectl patch serviceaccount default \
   -n openshift-marketplace
 ```
 
-### Step 3: Apply CatalogSource
+### Step 3: Deploy Operator (Choose One Approach)
+
+**Approach A: operator-sdk run bundle (Quickest for TP testing)**
+
+For tech preview testing without FBC, use `operator-sdk` to deploy directly from the bundle:
 
 ```bash
-# Use the YAML file generated by extract-release-artifacts.sh
-kubectl apply -f output/catalogsource-20260629-212803.yaml
+# Deploy operator from bundle (no index image needed)
+operator-sdk run bundle \
+  registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle@sha256:167306b... \
+  --pull-secret-name rhdr-staging-pull-secret \
+  -n <target-namespace>
 
-# Or apply manually
+# Clean up after testing
+operator-sdk cleanup rhdr-hub-operator -n <target-namespace>
+```
+
+This handles catalog setup internally, so you don't need to build an index image or apply a CatalogSource manually.
+
+**Approach B: Build Index Image + CatalogSource (for shareable testing)**
+
+If you need a reusable CatalogSource to share with QE, build an index image first:
+
+```bash
+# Step 1: Build index image from bundle(s)
+opm index add \
+  --bundles registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle@sha256:167306b...,registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle@sha256:883cf79...,registry.stage.redhat.io/rhdr/rhdr-multicluster-operator-bundle@sha256:7feabd1... \
+  --tag quay.io/<your-org>/rhdr-test-index:latest
+
+# Step 2: Push index to registry
+podman push quay.io/<your-org>/rhdr-test-index:latest
+
+# Step 3: Create CatalogSource pointing at the INDEX (not the bundle)
 kubectl apply -f - <<EOF
 apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
@@ -383,9 +519,11 @@ metadata:
   namespace: openshift-marketplace
 spec:
   sourceType: grpc
-  image: registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle@sha256:167306b35c8f37e9abcd3aa003a5b292d43f6216716b297755eb7de794e23b47
+  image: quay.io/<your-org>/rhdr-test-index:latest
 EOF
 ```
+
+This creates a reusable index serving all three operators.
 
 ### Step 4: Verify CatalogSource is Ready
 
@@ -453,71 +591,7 @@ Use the `extract-release-artifacts.sh` script output (`podman-pull-*.sh`) to pul
 bash output/podman-pull-20260629-212803.sh
 ```
 
----
 
-## Deploying to OpenShift Cluster
-
-### Authentication When Using CatalogSource in OCP
-
-**Important:** When applying the CatalogSource to an OpenShift cluster, **the cluster also needs credentials** to pull the bundle image. This is separate from your local `podman login` credentials.
-
-#### Option A: Create ImagePullSecret (Recommended)
-
-```bash
-# Step 1: Create a secret with your staging registry credentials
-kubectl create secret docker-registry rhdr-staging-pull-secret \
-  --docker-server=registry.stage.redhat.io \
-  --docker-username=<your-service-account-username> \
-  --docker-password=<your-service-account-token> \
-  --docker-email=your-email@example.com \
-  -n openshift-marketplace
-
-# Step 2: Patch the default service account to use this secret
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "rhdr-staging-pull-secret"}]}' \
-  -n openshift-marketplace
-
-# Step 3: Apply the CatalogSource
-kubectl apply -f output/catalogsource-20260629-212803.yaml
-```
-
-#### Option B: Use Existing Docker Config (if available)
-
-If your cluster already has `~/.docker/config.json` configured with staging credentials:
-
-```bash
-# Create a secret from your local docker config
-kubectl create secret generic docker-config \
-  --from-file=.dockerconfigjson=~/.docker/config.json \
-  --type=kubernetes.io/dockerconfigjson \
-  -n openshift-marketplace
-
-# Patch service account
-kubectl patch serviceaccount default \
-  -p '{"imagePullSecrets": [{"name": "docker-config"}]}' \
-  -n openshift-marketplace
-
-# Apply CatalogSource
-kubectl apply -f output/catalogsource-20260629-212803.yaml
-```
-
-#### Verify CatalogSource is Ready
-
-```bash
-# Check status
-kubectl get catalogsource -n openshift-marketplace
-
-# View detailed status
-kubectl describe catalogsource rhdr-staging-catalog -n openshift-marketplace
-
-# View logs if there are issues
-kubectl logs -n openshift-operator-lifecycle-manager -l app=cataloger | grep rhdr
-```
-
-**Troubleshooting CatalogSource failures:**
-- If status shows authentication errors: ensure ImagePullSecret is created and service account is patched
-- If image cannot be found: verify the digest in the YAML matches current published images
-- If connection timeout: check cluster can reach `registry.stage.redhat.io` (may need proxy configuration for corporate networks)
 
 ---
 
@@ -602,29 +676,42 @@ podman pull registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle@sha256:<d
 
 ---
 
-### Option 2: CatalogSource from Bundle (Operator Testing)
+### Option 2: Deploy Operators with operator-sdk (Fastest for Tech Preview)
 
-For testing operator install/upgrade via OLM without a full FBC, QE creates a `CatalogSource` pointing at your staged bundle image:
+For testing operator install without needing to build an index image, use `operator-sdk run bundle`:
 
-**Example CatalogSource YAML for QE to apply:**
+**Command for QE to run:**
 
-```yaml
-apiVersion: operators.coreos.com/v1alpha1
-kind: CatalogSource
-metadata:
-  name: rhdr-staging-catalog
-  namespace: openshift-marketplace
-spec:
-  sourceType: grpc
-  image: registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle@sha256:<digest>
+```bash
+# Deploy all three operators from bundles
+operator-sdk run bundle \
+  registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle@sha256:<digest> \
+  --pull-secret-name rhdr-staging-pull-secret \
+  -n <test-namespace>
+
+operator-sdk run bundle \
+  registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle@sha256:<digest> \
+  --pull-secret-name rhdr-staging-pull-secret \
+  -n <test-namespace>
+
+operator-sdk run bundle \
+  registry.stage.redhat.io/rhdr/rhdr-multicluster-operator-bundle@sha256:<digest> \
+  --pull-secret-name rhdr-staging-pull-secret \
+  -n <test-namespace>
 ```
 
 **What to give QE:**
-- Bundle image pullspec with digest
-- YAML template they can customize
-- Instructions to apply it with `kubectl apply -f`
+- Bundle image pullspecs with digests
+- The commands above (customize namespace as needed)
+- Note: No index image build or CatalogSource needed
 
-Once applied, OLM will discover and allow installation of the operator from the bundle.
+**Clean up after testing:**
+
+```bash
+operator-sdk cleanup rhdr-hub-operator -n <test-namespace>
+operator-sdk cleanup rhdr-cluster-operator -n <test-namespace>
+operator-sdk cleanup rhdr-multicluster-operator -n <test-namespace>
+```
 
 ---
 
@@ -692,9 +779,20 @@ Prepare a **delivery document** for QE with the following structure:
 podman pull registry.stage.redhat.io/rhdr/rhdr-hub-rhel9-operator:v4.22
 \`\`\`
 
-### Option B: OLM Testing with CatalogSource
-Apply this manifest:
-\`\`\`yaml
+### Option B: OLM Testing with operator-sdk (No index image needed)
+```bash
+# Deploy operator directly from bundle
+operator-sdk run bundle \
+  registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle:v4.22 \
+  --pull-secret-name rhdr-staging-pull-secret \
+  -n <test-namespace>
+
+# Clean up
+operator-sdk cleanup rhdr-cluster-operator -n <test-namespace>
+```
+
+**Or, for reusable CatalogSource:** Build an index image first with `opm index add`, then create a CatalogSource pointing at the INDEX image (not the bundle):
+```yaml
 apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
 metadata:
@@ -702,8 +800,8 @@ metadata:
   namespace: openshift-marketplace
 spec:
   sourceType: grpc
-  image: registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle:v4.22
-\`\`\`
+  image: quay.io/<your-org>/rhdr-test-index:latest
+```
 
 ### Option C: Cluster-Wide Image Redirection
 Apply this manifest to transparently redirect all `registry.redhat.io/rhdr` pulls to staging:

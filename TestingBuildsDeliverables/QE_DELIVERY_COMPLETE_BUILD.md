@@ -83,22 +83,43 @@ podman pull registry.stage.redhat.io/rhdr/rhdr-ramen-operator-base-image@sha256:
 
 ## For OLM Testing
 
-Create a CatalogSource using one of the bundle images:
+**Approach A: Use operator-sdk run bundle (Quickest for tech preview)**
 
-```yaml
-apiVersion: operators.coreos.com/v1alpha1
-kind: CatalogSource
-metadata:
-  name: rhdr-staging-catalog
-  namespace: openshift-marketplace
-spec:
-  sourceType: grpc
-  image: registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle@sha256:167306b35c8f37e9abcd3aa003a5b292d43f6216716b297755eb7de794e23b47
+Deploy operators directly from bundles without needing to build an index image:
+
+```bash
+# Deploy hub operator
+operator-sdk run bundle \
+  registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle@sha256:167306b35c8f37e9abcd3aa003a5b292d43f6216716b297755eb7de794e23b47 \
+  --pull-secret-name rhdr-staging-pull-secret \
+  -n <test-namespace>
+
+# Deploy cluster operator  
+operator-sdk run bundle \
+  registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle@sha256:883cf79151bafbfc9931c08b75d542bd55879060425b695bba688f160ecff8bb \
+  --pull-secret-name rhdr-staging-pull-secret \
+  -n <test-namespace>
+
+# Clean up
+operator-sdk cleanup rhdr-hub-operator -n <test-namespace>
+operator-sdk cleanup rhdr-cluster-operator -n <test-namespace>
 ```
 
-Or use the cluster operator bundle:
+**Approach B: Build Index Image + CatalogSource (for reusable testing)**
 
-```yaml
+To create a shareable CatalogSource, first build an index image:
+
+```bash
+# Build index from all three operator bundles
+opm index add \
+  --bundles registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle@sha256:167306b...,registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle@sha256:883cf79...,registry.stage.redhat.io/rhdr/rhdr-multicluster-operator-bundle@sha256:7feabd1... \
+  --tag quay.io/<your-org>/rhdr-test-index:latest
+
+# Push index image
+podman push quay.io/<your-org>/rhdr-test-index:latest
+
+# Create CatalogSource pointing at the INDEX (not the bundle)
+kubectl apply -f - <<EOF
 apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
 metadata:
@@ -106,7 +127,8 @@ metadata:
   namespace: openshift-marketplace
 spec:
   sourceType: grpc
-  image: registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle@sha256:883cf79151bafbfc9931c08b75d542bd55879060425b695bba688f160ecff8bb
+  image: quay.io/<your-org>/rhdr-test-index:latest
+EOF
 ```
 
 ---
@@ -175,17 +197,39 @@ chmod +x extract-release-artifacts.sh
 
 ### Step 3: Use Generated Output Files
 
-The script creates two files in `./output/` with timestamped names:
+The script creates timestamped files in `./output/`:
 
 **A. Pull all components locally:**
 ```bash
 bash output/podman-pull-20260629-212803.sh
 ```
 
-**B. Deploy to OCP cluster:**
+**B. Deploy CatalogSource to OCP:**
 ```bash
 kubectl apply -f output/catalogsource-20260629-212803.yaml
 ```
+
+**C. (Optional) Mirror to quay.io:**
+If you want to avoid proxy/authentication issues entirely, enable mirroring:
+```bash
+./extract-release-artifacts.sh rhdr-tenant 10 true
+```
+
+This will mirror all 9 components to `quay.io/openshift-virtualization-dr/` and generate:
+- `mirrored-pull-TIMESTAMP.sh` — pull commands for the mirror
+- `mirror-log-TIMESTAMP.txt` — detailed operation log
+
+Then use mirrored images (no auth needed):
+```bash
+bash output/mirrored-pull-20260630-194525.sh
+```
+
+Or use operator-sdk to deploy directly from the mirrored bundle (no index build needed):
+```bash
+operator-sdk run bundle quay.io/openshift-virtualization-dr/rhdr-hub-operator-bundle:staging -n <test-namespace>
+```
+
+Or, if you need a reusable CatalogSource, build an index image from the mirrored bundles first, then point CatalogSource at the INDEX image (not the bundle).
 
 ---
 

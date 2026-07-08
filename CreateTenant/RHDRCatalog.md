@@ -1,36 +1,85 @@
 # Building the RHDR FBC Catalog for Version 4.22
 
-**Document Version:** 1.1  
+**Document Version:** 1.2  
 **Date Created:** June 1, 2026  
-**Last Updated:** June 1, 2026 - CSI operator and sidecar marked as mandatory
+**Last Updated:** July 7, 2026 — RHODF FBC pattern; `rhdr-fbc-4-22`; implementation branches ready  
 **Status:** Reference Implementation Guide  
-**Related Documents:** [TENANT_NAMING_AND_FORK_STRATEGY.md](../TENANT_NAMING_AND_FORK_STRATEGY.md), [ConstraintFileStages.md](./ConstraintFileStages.md)  
+**Related Documents:** [RHDRFBCApplicationGitOps.md](./RHDRFBCApplicationGitOps.md), [TENANT_NAMING_AND_FORK_STRATEGY.md](../TENANT_NAMING_AND_FORK_STRATEGY.md), [ConstraintFileStages.md](./ConstraintFileStages.md)  
 **JIRA Story:** [VIRTDR-141](https://redhat.atlassian.net/browse/VIRTDR-141)  
 **Konflux Tenant:** `rhdr-tenant` namespace  
-**Konflux Application:** `rhdr-4-22`  
+**Konflux Applications:** `rhdr-4-22` (9 release components) · `rhdr-fbc-4-22` (FBC catalog — see [RHDRFBCApplicationGitOps.md](./RHDRFBCApplicationGitOps.md))
 
 ---
 
 ## Executive Summary
 
-This guide describes how to build the Filesystem-based Catalog (FBC) for Red Hat Disaster Recovery (RHDR) version 4.22. The FBC aggregates all RHDR operator bundles into a single OLM (Operator Lifecycle Manager) catalog image that can be deployed to Kubernetes clusters.
+This guide describes how to build the Filesystem-based Catalog (FBC) for Red Hat Disaster Recovery (RHDR) version 4.22. The FBC aggregates **four** RHDR operator bundles into a single OLM catalog image. The broader **`rhdr-4-22` application** builds and releases **nine** container components to `registry.stage.redhat.io`.
 
 **What you will achieve:**
-- ✅ Create a unified OLM catalog for all RHDR 4.22 operators
-- ✅ Define the FBC repository structure in `rhdr-fbc-catalog`
+- ✅ Understand all 9 RHDR 4.22 Konflux/release components
+- ✅ Create a unified OLM catalog for the 4 operator bundles
+- ✅ Define the FBC repository structure in `rhdr-fbc`
 - ✅ Build the catalog image through Konflux CI/CD
 - ✅ Make RHDR operators discoverable and installable via OLM
 
 ---
 
-### 📌 Critical Note: CSI Components are Mandatory
+## RHDR 4.22 — All 9 Components
 
-As of June 1, 2026, **the CSI addons operator and sidecar are required components** of the RHDR 4.22 release:
+The `rhdr-4-22` Konflux application ([rhdr-4-22.yaml](https://gitlab.cee.redhat.com/rhtap-releng/konflux-release-data/-/blob/main/tenants-config/cluster/stone-prod-p02/tenants/rhdr-tenant/rhdr-4-22.yaml)) defines **nine** components. All nine are mapped in the stage ReleasePlanAdmission ([rhdr-4-22-stage.yaml](https://gitlab.cee.redhat.com/rhtap-releng/konflux-release-data/-/blob/main/config/stone-prod-p02.hjvn.p1/product/ReleasePlanAdmission/rhdr/rhdr-4-22-stage.yaml)) and published to `registry.stage.redhat.io/rhdr/…` on release.
 
-- **rhdr-csi-addons-operator** - Manages storage replication capabilities
-- **rhdr-csi-addons-sidecar** - Enables disaster recovery sidecar functionality
+Product definitions are in [pyxis-repo-configs/products/rhdr/rhdr.yaml](https://gitlab.cee.redhat.com/rhtap-releng/pyxis-repo-configs/-/blob/main/products/rhdr/rhdr.yaml).
 
-These are **no longer conditional** and must be included in the FBC catalog and release bundles.
+| # | Konflux component | Layer | Image type | GitLab source repo | Released registry path (`registry.stage.redhat.io`) | In FBC catalog |
+|---|-------------------|-------|------------|-------------------|-----------------------------------------------------|----------------|
+| 1 | `rhdr-hub-operator-bundle-4-22` | Hub | Operator bundle | `rh-ocp-dr/rhdr-hub-operator-bundle` | `rhdr/rhdr-hub-operator-bundle` | ✅ `rhdr-hub-operator` |
+| 2 | `rhdr-cluster-operator-bundle-4-22` | Cluster | Operator bundle | `rh-ocp-dr/rhdr-cluster-operator-bundle` | `rhdr/rhdr-cluster-operator-bundle` | ✅ `rhdr-cluster-operator` |
+| 3 | `rhdr-multicluster-operator-bundle-4-22` | Multicluster | Operator bundle | `rh-ocp-dr/rhdr-multicluster-operator-bundle` | `rhdr/rhdr-multicluster-operator-bundle` | ✅ `rhdr-multicluster-operator` |
+| 4 | `rhdr-multicluster-operator-image-4-22` | Multicluster | Operator controller | `rh-ocp-dr/rhdr-multicluster-operator-image` | `rhdr/rhdr-multicluster-rhel9-operator` | — |
+| 5 | `rhdr-csi-addons-operator-4-22` | CSI Addons | Operator controller | `rh-ocp-dr/rhdr-csi-addons-operator` | `rhdr/rhdr-csi-addons-rhel9-operator` | — |
+| 6 | `rhdr-csi-addons-operator-bundle-4-22` | CSI Addons | Operator bundle | `rh-ocp-dr/rhdr-csi-addons-operator-bundle` | `rhdr/rhdr-csi-addons-operator-bundle` | ✅ `rhdr-csi-addons-operator` |
+| 7 | `rhdr-csi-addons-sidecar-4-22` | CSI Addons | Layered / sidecar | `rh-ocp-dr/rhdr-csi-addons-sidecar` | `rhdr/rhdr-csi-addons-sidecar-rhel9` | — |
+| 8 | `rhdr-ramen-operator-base-image-4-22` | Ramen | Layered / base image | `rh-ocp-dr/rhdr-ramen-operator` | `rhdr/rhdr-ramen-operator-base-image-rhel9` | — |
+| 9 | `rhdr-ramendr-console-4-22` | Console | Layered / UI | `rh-ocp-dr/rhdr-multicluster-console` | `rhdr/rhdr-ramendr-console-rhel9` | — |
+
+### Component roles
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    rhdr-4-22 Application (9 components)                  │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Operator bundles (4) ──► referenced by FBC catalog                     │
+│    • rhdr-hub-operator-bundle-4-22                                      │
+│    • rhdr-cluster-operator-bundle-4-22                                  │
+│    • rhdr-multicluster-operator-bundle-4-22                             │
+│    • rhdr-csi-addons-operator-bundle-4-22                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Operator controllers (2) ──► released; embedded in bundles             │
+│    • rhdr-multicluster-operator-image-4-22                              │
+│    • rhdr-csi-addons-operator-4-22                                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Layered images (3) ──► released; referenced by operator CSVs           │
+│    • rhdr-csi-addons-sidecar-4-22                                       │
+│    • rhdr-ramen-operator-base-image-4-22                                │
+│    • rhdr-ramendr-console-4-22                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  rhdr-fbc-4-22 Application (separate) — 4 OLM packages in catalog         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Note:** Pyxis also defines `rhdr-hub-rhel9-operator` and `rhdr-cluster-rhel9-operator` controller repositories. Those controllers are shipped inside their operator bundles; there are no separate Konflux components for them in `rhdr-4-22` today.
+
+### FBC vs release scope
+
+| Scope | Count | What |
+|-------|-------|------|
+| **Release (`rhdr-4-22`)** | 9 components | All images published via `rh-advisories` to `registry.stage.redhat.io/rhdr/` |
+| **FBC catalog (`rhdr-fbc-4-22`)** | 4 operator packages | Only bundles with `fbc_opt_in: true` in `rhdr.yaml` |
+
+The CSI sidecar (`rhdr-csi-addons-sidecar-4-22`) and CSI operator (`rhdr-csi-addons-operator-4-22`) are **mandatory release components** but only the **CSI addons operator bundle** appears as an OLM package in the FBC.
 
 ## Part 1: FBC Overview and Architecture
 
@@ -48,15 +97,14 @@ The RHDR FBC serves as the **central distribution point** for all disaster recov
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    rhdr-fbc-catalog Image                       │
-│              quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:TAG        │
+│                    rhdr-fbc Image (rhdr-fbc-4-22 app)              │
+│     quay.io/redhat-user-workloads/rhdr-tenant/rhdr-fbc/…          │
 │                                                                 │
-│  Contains references to:                                         │
+│  Contains references to (4 OLM packages):                        │
 │  ├─ rhdr-hub-operator-bundle                                    │
 │  ├─ rhdr-cluster-operator-bundle                                │
 │  ├─ rhdr-multicluster-operator-bundle                           │
-│  ├─ rhdr-csi-addons-operator-bundle                             │
-│  └─ rhdr-csi-addons-sidecar-bundle                              │
+│  └─ rhdr-csi-addons-operator-bundle                             │
 │                                                                 │
 │  OLM CatalogSource points to this image                         │
 │  ↓                                                              │
@@ -69,95 +117,101 @@ The RHDR FBC serves as the **central distribution point** for all disaster recov
 | Aspect | RHDR FBC | RHODF FBC |
 |--------|----------|-----------|
 | **Purpose** | Disaster Recovery operators only | Complete ODF storage stack |
-| **Scope** | Hub, Cluster, MCO, CSI Addons | OCS, Rook, Ceph, NooBaa, ODF MCO |
+| **Scope** | 9 release components; 4 FBC operator packages | OCS, Rook, Ceph, NooBaa, ODF MCO |
 | **Versioning** | Per-release (4.22, 4.23, etc.) | Per-OCP version |
-| **Components** | ~4-5 operators | ~8-12 operators |
-| **Location** | `rh-ocp-dr/rhdr-fbc-catalog` | `rhodf/konflux/rhodf-fbc` |
+| **FBC packages** | 4 operator bundles | ~8–12 operators |
+| **Location** | `rh-ocp-dr/rhdr-catalog` | `rhodf/konflux/rhodf-fbc` |
 | **Image Registry** | `quay.io/rh-ocp-dr/rhdr/` | `quay.io/rh-ocp-dr/rhodf/` |
 
 ---
 
 ## Part 2: Required Components from RHDR Tenant
 
-### 2.1 Operator Bundles (Prerequisites)
+### 2.1 All nine release components (`rhdr-4-22`)
 
-Before building the FBC, all operator bundles must be published to the registry. These are built by their respective components in Konflux:
+All nine components must build successfully and release to `registry.stage.redhat.io` before the FBC catalog can reference current bundle digests.
 
-| Component | Bundle Image | Status |
-|-----------|--------------|--------|
-| `rhdr-hub-operator-bundle-4-22` | `quay.io/rh-ocp-dr/rhdr/rhdr-hub-operator-bundle:4.22` | ✅ Required |
-| `rhdr-cluster-operator-bundle-4-22` | `quay.io/rh-ocp-dr/rhdr/rhdr-cluster-operator-bundle:4.22` | ✅ Required |
-| `rhdr-multicluster-operator-bundle-4-22` | `quay.io/rh-ocp-dr/rhdr/rhdr-multicluster-operator-bundle:4.22` | ✅ Required |
-| `rhdr-csi-addons-operator-bundle-4-22` | `quay.io/rh-ocp-dr/rhdr/rhdr-csi-addons-operator-bundle:4.22` | ✅ **Required** |
-| `rhdr-csi-addons-sidecar-bundle-4-22` | `quay.io/rh-ocp-dr/rhdr/rhdr-csi-addons-sidecar-bundle:4.22` | ✅ **Required** |
+| # | Konflux component | Staging pull example |
+|---|-------------------|----------------------|
+| 1 | `rhdr-hub-operator-bundle-4-22` | `registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle:v4.22` |
+| 2 | `rhdr-cluster-operator-bundle-4-22` | `registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle:v4.22` |
+| 3 | `rhdr-multicluster-operator-bundle-4-22` | `registry.stage.redhat.io/rhdr/rhdr-multicluster-operator-bundle:v4.22` |
+| 4 | `rhdr-multicluster-operator-image-4-22` | `registry.stage.redhat.io/rhdr/rhdr-multicluster-rhel9-operator:v4.22` |
+| 5 | `rhdr-csi-addons-operator-4-22` | `registry.stage.redhat.io/rhdr/rhdr-csi-addons-rhel9-operator:v4.22` |
+| 6 | `rhdr-csi-addons-operator-bundle-4-22` | `registry.stage.redhat.io/rhdr/rhdr-csi-addons-operator-bundle:v4.22` |
+| 7 | `rhdr-csi-addons-sidecar-4-22` | `registry.stage.redhat.io/rhdr/rhdr-csi-addons-sidecar-rhel9:v4.22` |
+| 8 | `rhdr-ramen-operator-base-image-4-22` | `registry.stage.redhat.io/rhdr/rhdr-ramen-operator-base-image-rhel9:v4.22` |
+| 9 | `rhdr-ramendr-console-4-22` | `registry.stage.redhat.io/rhdr/rhdr-ramendr-console-rhel9:v4.22` |
 
-### 2.2 Build Dependencies
+Use [extract-release-artifacts.sh](../TestingBuildsDeliverables/extract-release-artifacts.sh) to collect exact digests from Konflux Release objects after a successful stage release.
 
-The FBC build depends on these RHDR tenant components having **completed builds**:
+### 2.2 Operator bundles for FBC (4 prerequisites)
+
+The FBC catalog references **only** the four operator bundles (`fbc_opt_in: true` in `rhdr.yaml`). These must be published before updating catalog JSON:
+
+| Konflux component | OLM package | FBC catalog entry |
+|-------------------|-------------|-------------------|
+| `rhdr-hub-operator-bundle-4-22` | `rhdr-hub-operator` | ✅ Required |
+| `rhdr-cluster-operator-bundle-4-22` | `rhdr-cluster-operator` | ✅ Required |
+| `rhdr-multicluster-operator-bundle-4-22` | `rhdr-multicluster-operator` | ✅ Required |
+| `rhdr-csi-addons-operator-bundle-4-22` | `rhdr-csi-addons-operator` | ✅ Required |
+
+The other five components (multicluster operator image, CSI operator, sidecar, ramen base image, console) are released with the product but are **not** separate entries in the FBC index — they are consumed via bundle CSVs and related image references.
+
+### 2.3 Build dependencies (FBC nudges)
+
+The FBC build should run after the **four bundle** components have completed builds:
 
 ```mermaid
 graph TD
-    A["rhdr-hub-operator-bundle-4-22"] -->|nudges| FBC["rhdr-fbc-catalog-4-22"]
+    A["rhdr-hub-operator-bundle-4-22"] -->|nudges| FBC["rhdr-fbc-4-22"]
     B["rhdr-cluster-operator-bundle-4-22"] -->|nudges| FBC
     C["rhdr-multicluster-operator-bundle-4-22"] -->|nudges| FBC
     D["rhdr-csi-addons-operator-bundle-4-22"] -->|nudges| FBC
-    E["rhdr-csi-addons-sidecar-bundle-4-22"] -->|nudges| FBC
-    FBC -->|produces| IMG["quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:4.22"]
-    IMG -->|registered in| OLMSRC["OLM CatalogSource"]
+    FBC -->|produces| IMG["FBC catalog image"]
+    IMG -->|registered in| OLMSRC["OLM CatalogSource / operator index"]
     OLMSRC -->|makes operators discoverable| WEBUI["Operator Hub Web UI"]
 ```
 
-### 2.3 Required Tenant Configuration Changes
+The remaining five components must be released for a complete RHDR product, but they do not nudge the FBC build directly.
 
-Before building the FBC, update the Konflux tenant with these configurations:
+### 2.4 Required Tenant Configuration Changes
 
-#### A. Update Application Metadata (if not already done)
+RHDR uses **two Konflux applications** and **two RPAs**:
 
-```yaml
-apiVersion: appstudio.redhat.com/v1alpha1
-kind: Application
-metadata:
-  name: rhdr-4-22
-  namespace: rhdr-tenant
-  labels:
-    app.kubernetes.io/name: rhdr
-    app.kubernetes.io/version: "4.22"
-spec:
-  displayName: "RHDR 4.22"
-  description: "Red Hat Disaster Recovery 4.22 - Hub, Cluster, and Console components"
-```
+| Object | Name | Status |
+|--------|------|--------|
+| Container RPA | `rhdr-4-22-stage` | ✅ Exists — all 9 components → `registry.stage.redhat.io` |
+| FBC RPA | `rhdr-fbc-4-22-stage` | ✅ Branch ready — `rhdr-fbc-4-22` app → operator index via `fbc-release` |
 
-#### B. Add FBC Component to Application
+Do **not** add the FBC component to `rhdr-4-22.yaml`. Follow the step-by-step guide in **[RHDRFBCApplicationGitOps.md](./RHDRFBCApplicationGitOps.md)** (Konflux Help–aligned):
+
+1. Create GitLab repo `rh-ocp-dr/rhdr-catalog` with `v4.22/catalog.json` and `catalog.Dockerfile`
+2. Add `fbc-fragments/4-22/fbc-4-22.yaml` (Application, Component, ITS, ReleasePlan)
+3. Add `fbc-rhdr-stage` EnterpriseContractPolicy (`registry.stage.redhat.io/` for OLM bundle refs)
+4. Add `rhdr-fbc-4-22-stage` ReleasePlanAdmission with 4 `allowedPackages`
 
 ```yaml
----
+# tenants-config/.../rhdr-tenant/fbc-fragments/4-22/fbc-4-22.yaml (summary)
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Component
 metadata:
-  annotations:
-    build.appstudio.openshift.io/pipeline: '{"name":"docker-build-oci-ta","bundle":"latest"}'
-  name: rhdr-fbc-catalog-4-22
+  name: rhdr-fbc-4-22
   namespace: rhdr-tenant
+  annotations:
+    build.appstudio.openshift.io/pipeline: '{"name":"fbc-builder","bundle":"latest"}'
 spec:
-  application: rhdr-4-22
-  componentName: rhdr-fbc-catalog-4-22
-  # FBC catalog receives nudges from all bundle components
-  build-nudges-ref:
-    - rhdr-hub-operator-bundle-4-22
-    - rhdr-cluster-operator-bundle-4-22
-    - rhdr-multicluster-operator-bundle-4-22
-    - rhdr-csi-addons-operator-bundle-4-22
-    - rhdr-csi-addons-sidecar-bundle-4-22
+  application: rhdr-fbc-4-22
+  componentName: rhdr-fbc-4-22
   source:
     git:
-      url: https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-fbc-catalog
-      revision: main  # or specific branch like "4.22"
-      context: ./
-      dockerfileUrl: "catalog.Dockerfile"  # or just "Dockerfile"
-  container-image:
-    name: rhdr-fbc-catalog
-    imagePullPolicy: Always
+      url: https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-catalog
+      revision: main
+      dockerfileUrl: catalog.Dockerfile
+      context: v4.22
 ```
+
+> **Note:** Parts 4–6 below contain legacy UI/imperative walkthroughs with older naming (`rhdr-fbc-catalog`). Use [RHDRFBCApplicationGitOps.md](./RHDRFBCApplicationGitOps.md) as the authoritative GitOps reference.
 
 ---
 
@@ -288,7 +342,7 @@ git push origin add-fbc-catalog-4-22
 
 ### 3.5 How This Relates to tenants-config
 
-The `rhdr-4-22.yaml` file in `tenants-config/cluster/stone-prod-p02/tenants/rhdr-tenant/` is the **single source of truth**:
+The `rhdr-4-22.yaml` file in `tenants-config/cluster/stone-prod-p02/tenants/rhdr-tenant/` is the **single source of truth** for all **nine** release components. The FBC application lives in `fbc-fragments/4-22/fbc-4-22.yaml` (see [RHDRFBCApplicationGitOps.md](./RHDRFBCApplicationGitOps.md)).
 
 ```yaml
 # File: tenants-config/cluster/stone-prod-p02/tenants/rhdr-tenant/rhdr-4-22.yaml
@@ -300,24 +354,16 @@ metadata:
   namespace: rhdr-tenant
 spec:
   displayName: "RHDR 4.22"
-  description: "Red Hat Disaster Recovery 4.22"
+  description: "Red Hat Disaster Recovery 4.22 — all 9 release components"
 ---
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Component
 metadata:
-  name: rhdr-hub-operator-4-22
+  name: rhdr-hub-operator-bundle-4-22
   namespace: rhdr-tenant
 spec:
-  # Component definition from GitOps
-  # ↑ ArgoCD ensures cluster matches this definition
----
-apiVersion: appstudio.redhat.com/v1alpha1
-kind: Component
-metadata:
-  name: rhdr-fbc-catalog-4-22  # ← Add this when building FBC
-  namespace: rhdr-tenant
-spec:
-  # FBC component definition
+  application: rhdr-4-22
+  # … plus 8 more components (see table above)
 ```
 
 **When you change this file:**
@@ -333,9 +379,11 @@ After running `./build-manifests.sh` in tenants-config, Kustomize generates:
 ```
 tenants-config/auto-generated/
 └── cluster/stone-prod-p02/tenants/rhdr-tenant/
-    ├── appstudio.redhat.com_v1alpha1_component_rhdr-hub-operator-4-22.yaml
-    ├── appstudio.redhat.com_v1alpha1_component_rhdr-fbc-catalog-4-22.yaml  ← Generated
-    └── appstudio.redhat.com_v1alpha1_imagerepository_rhdr-fbc-catalog-4-22-image-repository.yaml
+    ├── appstudio.redhat.com_v1alpha1_component_rhdr-hub-operator-bundle-4-22.yaml
+    ├── appstudio.redhat.com_v1alpha1_component_rhdr-cluster-operator-bundle-4-22.yaml
+    ├── … (7 more release components)
+    └── fbc-fragments/4-22/
+        └── appstudio.redhat.com_v1alpha1_component_rhdr-fbc-4-22.yaml
 ```
 
 **Important:** These are auto-generated and should be committed alongside source files:
@@ -370,9 +418,6 @@ rhdr-fbc-catalog/
 │   ├── rhdr-csi-addons-operator/
 │   │   └── metadata/
 │   │       └── annotations.yaml        # CSI addons operator annotations
-│   └── rhdr-csi-addons-sidecar/
-│       └── metadata/
-│           └── annotations.yaml        # CSI addons sidecar annotations
 ├── .tekton/
 │   ├── rhdr-fbc-catalog-on-push.yaml
 │   └── rhdr-fbc-catalog-on-pull-request.yaml
@@ -784,16 +829,26 @@ metadata:
   namespace: rhdr-tenant
 spec:
   application: rhdr-4-22
-  displayName: "RHDR 4.22 with FBC Catalog v1"
+  displayName: "RHDR 4.22 release snapshot"
   components:
-    - name: rhdr-hub-operator-4-22
-      containerImage: quay.io/rh-ocp-dr/rhdr/rhdr-hub-operator:4.22
-    - name: rhdr-cluster-operator-4-22
-      containerImage: quay.io/rh-ocp-dr/rhdr/rhdr-cluster-operator:4.22
-    - name: rhdr-multicluster-operator-4-22
-      containerImage: quay.io/rh-ocp-dr/rhdr/rhdr-multicluster-operator:4.22
-    - name: rhdr-fbc-catalog-4-22
-      containerImage: quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:4.22
+    - name: rhdr-hub-operator-bundle-4-22
+      containerImage: registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle:v4.22
+    - name: rhdr-cluster-operator-bundle-4-22
+      containerImage: registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle:v4.22
+    - name: rhdr-multicluster-operator-bundle-4-22
+      containerImage: registry.stage.redhat.io/rhdr/rhdr-multicluster-operator-bundle:v4.22
+    - name: rhdr-multicluster-operator-image-4-22
+      containerImage: registry.stage.redhat.io/rhdr/rhdr-multicluster-rhel9-operator:v4.22
+    - name: rhdr-csi-addons-operator-4-22
+      containerImage: registry.stage.redhat.io/rhdr/rhdr-csi-addons-rhel9-operator:v4.22
+    - name: rhdr-csi-addons-operator-bundle-4-22
+      containerImage: registry.stage.redhat.io/rhdr/rhdr-csi-addons-operator-bundle:v4.22
+    - name: rhdr-csi-addons-sidecar-4-22
+      containerImage: registry.stage.redhat.io/rhdr/rhdr-csi-addons-sidecar-rhel9:v4.22
+    - name: rhdr-ramen-operator-base-image-4-22
+      containerImage: registry.stage.redhat.io/rhdr/rhdr-ramen-operator-base-image-rhel9:v4.22
+    - name: rhdr-ramendr-console-4-22
+      containerImage: registry.stage.redhat.io/rhdr/rhdr-ramendr-console-rhel9:v4.22
 EOF
 ```
 
@@ -1084,7 +1139,6 @@ spec:
         - rhdr-cluster-operator
         - rhdr-multicluster-operator
         - rhdr-csi-addons-operator
-        - rhdr-csi-addons-sidecar
 
     intention: production
 
@@ -1220,5 +1274,5 @@ oc logs -f pipelinerun/rhdr-fbc-catalog-4-22-build-<timestamp> -n rhdr-tenant
 ---
 
 **Document Status:** ✅ Complete  
-**Last Updated:** June 1, 2026 - Updated CSI components to mandatory status
+**Last Updated:** July 7, 2026 — Konflux Help FBC steps; 9 release components / 4 FBC packages; `rhdr-fbc-4-22` naming
 **Next Review:** After RHDR 4.22 release completion

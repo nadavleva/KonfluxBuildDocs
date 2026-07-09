@@ -1,16 +1,21 @@
 # Compliance Violations and Warnings Analysis
 
-**Latest Update:** 2026-06-28 (16:38 UTC)  
-**Last Source:** managed-wvrh7-verify-conforma.log  
-**Current Total Violations:** 6 (IMPROVED! -60% from 15)
-**Current Total Warnings:** 22
-**Total Notifications:** 28 (6 failures + 22 warnings)
+**Latest Update:** 2026-07-08 (12:15 UTC)  
+**Last Source:** managed-clfdr-verify-conforma.log  
+**Current Total Violations:** ~37 (REGRESSION - untrusted buildah-remote-oci-ta across all components)
+**Current Total Warnings:** ~80
+**Total Notifications:** ~117 (37 failures + 80 warnings)
 
-🚀 **REMARKABLE PROGRESS!** Down to 28 total notifications (-9 from 37!) and 6 violations (-9 from 15)! 🚀
-✅ **ALL MULTI-ARCH VIOLATIONS ELIMINATED!**
-✅ **QUAY EXPIRATION VIOLATION FIXED!**
-✅ **OLM UNMAPPED REFERENCES VIOLATIONS FIXED!**
-⚠️ **NEW: 3 build configuration violations for rhdr-csi-addons-operator-4-22**
+**SINGLE ROOT CAUSE:** All violations are due to ONE untrusted task: `buildah-remote-oci-ta`
+**FIX APPLIED:** Updated to Conforma-trusted digest `sha256:c77892be` + rhodf-reference `sast-shell-check` digest
+**STATUS:** Pushed to all 11 repos on 2026-07-08 — awaiting new builds + snapshot + Conforma rerun
+
+### Previous Milestones
+- ALL MULTI-ARCH VIOLATIONS ELIMINATED
+- QUAY EXPIRATION VIOLATION FIXED
+- OLM UNMAPPED REFERENCES VIOLATIONS FIXED
+- HERMETIC VIOLATIONS FIXED
+- SOURCE IMAGE VIOLATIONS FIXED
 
 ---
 
@@ -120,20 +125,148 @@ spec:
 | managed-m8jcs | 2026-06-24 | 12:36 | 36 | 120 | Partial Fixes | Hermetic params, source image fixes applied |
 | managed-94smf | 2026-06-24 | 20:09 | 28 | 136 | Stable | 61% reduction from initial |
 | managed-6jsrd | 2026-06-25 | 09:32 | 28 | 136 | Stable | Same as managed-94smf |
-| managed-7726g | 2026-06-25 | 09:53 | 42 | 132 | 🔴 **REGRESSION** | +14 violations from container.yaml syntax change |
-| managed-d4d9q | 2026-06-25 | 10:48 | 24 | 125 | 🟢 **Major Improvement** | `build-image-index: "false"` -18 violations, task digests updated |
-| managed-5hp7t | 2026-06-25 | 11:24 | 24 | 121 | 🔍 **INVESTIGATION** | Found CSI addons bundle still has multi-arch violation - parameter was missing |
-| managed-cm7vc | 2026-06-25 | 11:46 | 20 | 110 | 🟢 **CSI FIXED** | CSI addons bundle multi-arch FIXED! Violations: 24 → 20 (-4) |
-| managed-qxkkv | 2026-06-25 | 12:33 | **15** | 88 | 🎉 **BREAKTHROUGH** | Hub & cluster bundles fixed! Multi-arch ELIMINATED! Total: 130 → 103 (-27) |
-| managed-z2wl9 | 2026-06-25 | 13:13 | **15** | 88 | 🔄 **COMPOSITION CHANGE** | Hermetic violation FIXED ✅, quay_expiration NEW ⚠️ (+1 new/-1 hermetic) |
-| managed-wvrh7 | 2026-06-28 | 16:38 | **6** | 22 | 🚀 **MAJOR IMPROVEMENT** | CSI addons source build config FIXED! Violations: 15 → 6 (-9), -60% reduction! |
+| managed-7726g | 2026-06-25 | 09:53 | 42 | 132 | REGRESSION | +14 violations from container.yaml syntax change |
+| managed-d4d9q | 2026-06-25 | 10:48 | 24 | 125 | Major Improvement | `build-image-index: "false"` -18 violations, task digests updated |
+| managed-5hp7t | 2026-06-25 | 11:24 | 24 | 121 | INVESTIGATION | Found CSI addons bundle still has multi-arch violation |
+| managed-cm7vc | 2026-06-25 | 11:46 | 20 | 110 | CSI FIXED | CSI addons bundle multi-arch FIXED! |
+| managed-qxkkv | 2026-06-25 | 12:33 | **15** | 88 | BREAKTHROUGH | Hub & cluster bundles fixed! Multi-arch ELIMINATED! |
+| managed-z2wl9 | 2026-06-25 | 13:13 | **15** | 88 | COMPOSITION CHANGE | Hermetic violation FIXED, quay_expiration NEW |
+| managed-wvrh7 | 2026-06-28 | 16:38 | **6** | 22 | MAJOR IMPROVEMENT | CSI addons source build config FIXED! |
+| managed-2wh9p | 2026-07-06 | N/A | ~37 | ~80 | REGRESSION | Previous digest updates (0.10) were untrusted |
+| managed-88wsh | 2026-07-07 | N/A | ~37 | ~80 | Trusted task violations | All components: buildah-remote-oci-ta untrusted |
+| managed-clfdr | 2026-07-08 | 12:15 | **~37** | **~80** | FIX PUSHED | All buildah-remote-oci-ta updated to trusted sha256:c77892be |
 
 ### Fix Progress
-- **Stage 1 (managed-j7rcp → managed-m8jcs):** Reduced violations by 50% (72 → 36)
-- **Stage 2 (managed-m8jcs → managed-94smf):** Reduced violations by 22% (36 → 28)
-- **Stage 3 (managed-94smf → managed-qxkkv):** Reduced violations by 46% (28 → 15)
-- **Stage 4 (managed-z2wl9 → managed-wvrh7):** Reduced violations by 60% (15 → 6)
-- **Overall:** Net reduction of 92% violations eliminated (72 → 6)
+- **Stage 1 (managed-j7rcp -> managed-m8jcs):** Reduced violations by 50% (72 -> 36)
+- **Stage 2 (managed-m8jcs -> managed-94smf):** Reduced violations by 22% (36 -> 28)
+- **Stage 3 (managed-94smf -> managed-qxkkv):** Reduced violations by 46% (28 -> 15)
+- **Stage 4 (managed-z2wl9 -> managed-wvrh7):** Reduced violations by 60% (15 -> 6)
+- **Stage 5 (managed-wvrh7 -> managed-clfdr):** REGRESSION due to untrusted task digests (6 -> ~37)
+- **Stage 6 (managed-clfdr fix):** Updated to Conforma-trusted digest - expecting 0 violations
+
+---
+
+## managed-clfdr RESULTS (2026-07-08 12:15 UTC) - SINGLE ISSUE: UNTRUSTED BUILDAH
+
+### Root Cause Analysis
+
+**Single Root Cause:** ALL violations are from ONE untrusted task: `buildah-remote-oci-ta`
+
+The previous update (in the 2026-07-06/07 timeframe) changed `buildah-remote-oci-ta` from the older 0.9 digest to `0.10@sha256:148347cf...`. This version 0.10 is NOT in the Conforma trusted task list, resulting in every single component failing validation.
+
+### Violation Details (managed-clfdr)
+
+**Total: ~37 violations across 14 component evaluations**
+
+Three violation types, all related to the same root cause:
+1. `trusted_task.trusted` - "Untrusted version of PipelineTask 'build-images' (Task 'buildah-remote-oci-ta')"
+2. `tasks.required_untrusted_task_found` - "Required task 'buildah-remote-oci-ta' is required and present but not from a trusted task"
+3. `trusted_task.trusted` - "Image ... not built by a trusted task: Build Task(s) 'buildah-remote-oci-ta'"
+
+### Per-Component Violation Counts
+
+| Component | Violations | Warnings | Notes |
+|-----------|-----------|----------|-------|
+| rhdr-ramendr-console-4-22 (index) | 2 | 5 | buildah untrusted |
+| rhdr-ramendr-console-4-22 (amd64) | 3 | 9 | + CVE warnings |
+| rhdr-ramen-operator-base-image-4-22 (index) | 2 | 5 | buildah untrusted |
+| rhdr-ramen-operator-base-image-4-22 (amd64) | 3 | 5 | buildah untrusted |
+| rhdr-multicluster-operator-image-4-22 (index) | 2 | 7 | buildah untrusted |
+| rhdr-multicluster-operator-image-4-22 (amd64) | 3 | 7 | buildah untrusted |
+| rhdr-multicluster-operator-bundle-4-22 | 3 | 4 | buildah untrusted + NetworkPolicy RBAC warning |
+| rhdr-hub-operator-bundle-4-22 | 3 | 4 | buildah untrusted + NetworkPolicy RBAC warning |
+| rhdr-csi-addons-sidecar-4-22 (index) | 2 | 6 | buildah untrusted |
+| rhdr-csi-addons-sidecar-4-22 (amd64) | 3 | 6 | buildah untrusted |
+| rhdr-csi-addons-operator-bundle-4-22 | 3 | 5 | buildah untrusted + NetworkPolicy RBAC warning |
+| rhdr-csi-addons-operator-4-22 (index) | 2 | 6 | buildah untrusted |
+| rhdr-csi-addons-operator-4-22 (amd64) | 3 | 6 | buildah untrusted |
+| rhdr-cluster-operator-bundle-4-22 | 3 | 4 | buildah untrusted + NetworkPolicy RBAC warning |
+| **TOTAL** | **~37** | **~80** | |
+
+### Warnings Summary (managed-clfdr)
+
+| Warning Type | Count | Expiry | Action |
+|---|---|---|---|
+| `buildah-remote-oci-ta` unsupported | 14 | 2026-08-22 | FIXED - updated to trusted 0.9 |
+| `sast-shell-check-oci-ta` outdated | 14 | 2026-08-07 | FIXED - updated to rhodf reference |
+| `source-build-oci-ta` outdated | 2 | 2026-08-24 | Matches rhodf - defer for now |
+| NetworkPolicy RBAC missing | 4 | N/A | Informational - operator bundles |
+| Coverity/preflight/deprecated | ~25 | N/A | Informational test failures |
+| CVE warnings (console) | 4 | N/A | Non-blocking unpatched vulns |
+
+### Fix Applied (2026-07-08)
+
+**Task Digest Updates Pushed to All 11 Repos:**
+
+| Task | Old Digest | New Digest | Source |
+|------|-----------|-----------|--------|
+| `buildah-remote-oci-ta` | `0.10@sha256:148347cf...` | `0.9@sha256:c77892be9e7217b9baa9abdbaf432c16ee49c30601b6b25cfbc9d704295c58ef` | Conforma violation message |
+| `sast-shell-check-oci-ta` | `0.1@sha256:ab79e445...` | `0.1@sha256:3cbb3535af6e7d4396858179a6427caaffb2e68775594795692fc01f28ae313f` | rhodf odr-operator-4-23 reference |
+
+**Repos Updated:**
+1. rhdr-multicluster-console (branch: 4.22)
+2. rhdr-csi-addons-operator (branch: 4.22)
+3. rhdr-csi-addons-sidecar (branch: 4.22)
+4. rhdr-multicluster-operator-bundle (branch: 4.22)
+5. rhdr-hub-operator-bundle (branch: 4.22)
+6. rhdr-cluster-operator-bundle (branch: 4.22)
+7. rhdr-multicluster-operator-image (branch: 4.22)
+8. rhdr-ramen-operator (branch: 4.22)
+9. ramen (branch: destinfo)
+10. rhdr-csi-addons-operator-bundle (branch: 4.22)
+11. rhdr-catalog (branch: main)
+
+### Key Lessons Learned
+
+1. **Version 0.10 of buildah-remote-oci-ta is NOT trusted** - The previous update to 0.10 caused a full regression. Always use the EXACT digest from Conforma violation messages.
+2. **The Conforma violation message contains the trusted target digest** - Use `sha256:c77892be...` directly from the violation output, not from "latest" warnings.
+3. **The "latest bundle ref" in warnings is NOT always safe** - The sast-shell-check latest (`sha256:f6a115eb...`) broke builds; the rhodf reference (`sha256:3cbb3535...`) is a safer intermediate.
+4. **rhodf odr-operator-4-23 is a reliable reference** for task versions and digests.
+5. **Keep version tags consistent with trusted versions** - Using 0.9 (same as rhodf) rather than 0.10 (untrusted).
+
+### Expected Outcome After New Builds
+
+Once new builds are triggered by the pushes (2026-07-08) and a new snapshot is created:
+- **Expected violations: 0** (all buildah-remote-oci-ta violations eliminated)
+- **Expected warnings: ~20-30** (source-build outdated, NetworkPolicy RBAC, informative test failures)
+- **Previous category violations remain FIXED:**
+  - hermetic_task.hermetic: FIXED
+  - source_image.exists: FIXED
+  - tasks.required_tasks_found: FIXED
+  - olm.olm_bundle_multi_arch: FIXED
+  - olm.unmapped_references: FIXED
+  - test.no_skipped_tests: FIXED
+  - quay_expiration: FIXED
+
+---
+
+## Task Digest History & Trusted Versions Reference
+
+### buildah-remote-oci-ta
+
+| Date | Version:Digest | Status |
+|------|---------------|--------|
+| 2026-06-22 | 0.9@sha256:f667d114... | Original - later became untrusted |
+| 2026-07-06 | 0.10@sha256:148347cf... | UNTRUSTED - caused regression |
+| 2026-07-08 | **0.9@sha256:c77892be...** | **CURRENT - Conforma trusted** |
+| rhodf ref | 0.9@sha256:77007259... | rhodf trusted (different policy?) |
+
+### sast-shell-check-oci-ta
+
+| Date | Version:Digest | Status |
+|------|---------------|--------|
+| 2026-06-22 | 0.1@sha256:(original) | Became untrusted |
+| 2026-07-06 | 0.1@sha256:ab79e445... | Trusted but outdated (warning) |
+| 2026-07-06 | 0.1@sha256:f6a115eb... | BROKE BUILDS - reverted |
+| 2026-07-08 | **0.1@sha256:3cbb3535...** | **CURRENT - matches rhodf** |
+
+### source-build-oci-ta
+
+| Date | Version:Digest | Status |
+|------|---------------|--------|
+| Current | 0.3@sha256:8567bb7b... | Warning: outdated (expires 2026-08-24) |
+| Latest | 0.3@sha256:7c5575ac... | Available but not yet required |
+| rhodf ref | 0.3@sha256:8567bb7b... | Same as current (safe to defer) |
 
 ---
 

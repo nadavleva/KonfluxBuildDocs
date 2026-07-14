@@ -1,378 +1,253 @@
 # Creating RHDR FBC Application in rhdr-tenant
 
-**Status:** ⏳ PENDING  
+**Status:** Implemented — catalog tooling and GitOps in place; Konflux pipeline validation in progress  
 **Related JIRA:** [VIRTDR-141](https://redhat.atlassian.net/browse/VIRTDR-141) - RamenDR Standalone Konflux Tenant Setup  
-**Dependencies:** 
-- [VIRTDR-155](https://redhat.atlassian.net/browse/VIRTDR-155) - Create rhdr-tenant with Application and Components
-- All component builds and repository forks completed
+**Companion doc:** [RHDRFBCApplicationGitOps.md](./RHDRFBCApplicationGitOps.md)
 
 ---
 
 ## Overview
 
-The **FBC (Filesystem-based OLM Catalog)** is the final aggregation layer that combines all operator bundles into a single OLM catalog image. It enables users to install RHDR operators through standard Kubernetes OLM/OperatorHub mechanisms.
+The **File-Based Catalog (FBC)** aggregates four RHDR operator bundles into one OLM catalog image. Users install RHDR operators through standard OLM/OperatorHub after the catalog is published to the Red Hat operator index.
 
-### What is FBC?
+### What is in the FBC?
 
-- **Purpose:** Aggregates multiple operator bundles into a single queryable OLM catalog
-- **Components Included:**
-  - `rhdr-hub-operator-bundle`
-  - `rhdr-cluster-operator-bundle`
-  - `rhdr-multicluster-operator-bundle`
-  - `rhdr-csi-addons-operator-bundle` (if applicable)
-- **Output:** Single catalog image: `quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:TAG`
-- **Build Type:** Single-platform (Linux/AMD64)
+| OLM package (`allowedPackages`) | Konflux bundle component | Pyxis repo |
+|--------------------------------|--------------------------|------------|
+| `rhdr-hub-operator` | `rhdr-hub-operator-bundle-4-22` | `rhdr/rhdr-hub-operator-bundle` |
+| `rhdr-cluster-operator` | `rhdr-cluster-operator-bundle-4-22` | `rhdr/rhdr-cluster-operator-bundle` |
+| `rhdr-multicluster-operator` | `rhdr-multicluster-operator-bundle-4-22` | `rhdr/rhdr-multicluster-operator-bundle` |
+| `rhdr-csi-addons-operator` | `rhdr-csi-addons-operator-bundle-4-22` | `rhdr/rhdr-csi-addons-operator-bundle` |
 
-### Why FBC for RHDR?
+- **Channel:** `stable-4.22` — single bundle per package, no upgrade graph
+- **Konflux application:** `rhdr-fbc-4-22` (tenant: `rhdr-tenant`)
+- **Catalog repo:** `https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-catalog`
+- **BUILD image:** `quay.io/redhat-user-workloads/rhdr-tenant/rhdr-fbc/rhdr-fbc-4-22`
 
-| Benefit | Why It Matters |
-|---------|----------------|
-| **Single Installation Source** | Users get all RHDR operators from one catalog |
-| **Dependency Resolution** | OLM automatically handles operator dependencies |
-| **Version Management** | Different operator versions tracked in catalog index |
-| **Clean Separation** | Standalone FBC (not tied to ODF catalog) |
-| **Future-proof** | Supports incremental operator additions |
+---
+
+## Architecture (two tracks)
+
+```mermaid
+flowchart TB
+  subgraph track1 [Track 1: rhdr-4-22]
+    B1[9 components build on quay] --> R1[rhdr-4-22-stage release]
+    R1 --> STG["registry.stage.redhat.io/rhdr/*"]
+  end
+
+  subgraph catalog [rhdr-catalog repo]
+  Q["quay BUILD bundles\nbundle-images.env"] --> GS["make catalog-staging"]
+  GS --> CAT["v4.22/catalog JSON\nquay pullspecs"]
+  STG -.->|make catalog-production| CAT2["registry.stage pullspecs"]
+  end
+
+  subgraph track2 [Track 2: rhdr-fbc-4-22]
+  CAT --> B2[fbc-builder PipelineRun]
+  B2 --> VF[validate-fbc]
+  VF --> EC[fbc-rhdr-stage Conforma]
+  EC --> FBC[rhdr-fbc-4-22-stage FBC release]
+  FBC --> IDX[Operator index]
+  end
+```
+
+1. **Track 1** (`rhdr-4-22`): builds and releases container images via `rh-advisories`
+2. **Catalog repo** (`rhdr-catalog`): aggregates bundles into FBC JSON (quay BUILD paths during development)
+3. **Track 2** (`rhdr-fbc-4-22`): builds catalog image, Conforma, FBC index release
+
+See [rhdr-catalog/README.md](https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-catalog/-/blob/main/README.md) for full implementation detail.
 
 ---
 
 ## Prerequisites
 
-Before creating the FBC application, ensure the following are complete:
+### 1. Track 1 components building
 
-### 1. **All Operator Components Built** ✅
-- [ ] `rhdr-hub-operator` component building successfully
-- [ ] `rhdr-cluster-operator` component building successfully
-- [ ] `rhdr-multicluster-operator` component building successfully
-- [ ] `rhdr-csi-addons-operator` component building (if included in release)
+All 9 `rhdr-4-22` components must build successfully. The four **bundle** components feed the catalog:
 
-**Verification:**
-```bash
-# Check Konflux Dashboard for component build status
-# All operators should show "✅ Build Succeeded"
-```
+- `rhdr-hub-operator-bundle-4-22`
+- `rhdr-cluster-operator-bundle-4-22`
+- `rhdr-multicluster-operator-bundle-4-22`
+- `rhdr-csi-addons-operator-bundle-4-22`
 
-### 2. **All Bundle Components Built** ✅
-- [ ] `rhdr-hub-operator-bundle` component building successfully
-- [ ] `rhdr-cluster-operator-bundle` component building successfully
-- [ ] `rhdr-multicluster-operator-bundle` component building successfully
-- [ ] `rhdr-csi-addons-operator-bundle` building (if applicable)
-
-**Verification:**
-```bash
-# Check bundle image availability in registry
-podman pull quay.io/rh-ocp-dr/rhdr/rhdr-hub-operator-bundle:latest
-podman pull quay.io/rh-ocp-dr/rhdr/rhdr-cluster-operator-bundle:latest
-podman pull quay.io/rh-ocp-dr/rhdr/rhdr-multicluster-operator-bundle:latest
-```
-
-### 3. **Repository Forks Complete** ✅
-- [ ] `rh-ocp-dr/rhdr-fbc-catalog` repository created
-  - Contains `Dockerfile` for building FBC image
-  - Contains `.tekton/` directory with pipeline definitions
-  - Contains `catalog/` directory structure (to be populated)
-  - Contains `remote_source/` directory with `cachito.env`
-
-**Verification:**
-```bash
-git clone https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-fbc-catalog.git
-cd rhdr-fbc-catalog
-ls -la  # Should show: Dockerfile, catalog/, .tekton/, remote_source/
-```
-
-### 4. **Tenant RPA Complete** ✅
-- [ ] Release Plan Admission (RPA) files created in konflux-release-data:
-  - `config/constraints/product/rhdr-tenant.yaml`
-  - `config/stone-prod-p02.hjvn.p1/product/EnterpriseContractPolicy/registry-rhdr-stage.yaml`
-  - `config/stone-prod-p02.hjvn.p1/product/EnterpriseContractPolicy/registry-rhdr-prod.yaml`
-  - RPA files for each version: `rhdr-4-22-stage.yaml`, `rhdr-4-22-prod.yaml`
-
-**Verification:**
-```bash
-# Check MR status in konflux-release-data
-# Should be merged to main branch
-```
-
-### 5. **VIRTDR-141 Dependency** ✅
-- [ ] Epic VIRTDR-141 shows all sub-tasks complete
-- [ ] All component builds linked to VIRTDR-141
-
----
-
-## Step-by-Step: Creating RHDR FBC Application
-
-### Step 1: Verify FBC Repository Structure
+**Verify:**
 
 ```bash
-cd /tmp/rhdr-fbc-catalog-setup
-git clone https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-fbc-catalog.git
-cd rhdr-fbc-catalog
-
-# Expected structure
-tree -L 2
-# Expected output:
-# .
-# ├── Dockerfile
-# ├── .tekton/
-# │   ├── rhdr-fbc-catalog-on-push.yaml
-# │   └── rhdr-fbc-catalog-on-pull-request.yaml
-# ├── catalog/
-# │   ├── rhdr-hub-operator/
-# │   ├── rhdr-cluster-operator/
-# │   ├── rhdr-multicluster-operator/
-# │   └── rhdr-csi-addons-operator/ (if applicable)
-# └── remote_source/
-#     ├── cachito.env
-#     └── app/ -> (symlink to repo root)
+# Konflux builds push to quay (no :latest — use version tag)
+skopeo inspect --no-tags \
+  docker://quay.io/redhat-user-workloads/rhdr-tenant/rhdr/rhdr-hub-operator-bundle-4-22:v4.22.0-86 \
+  | jq -r '.Digest'
 ```
 
-### Step 2: Create FBC Component in Konflux UI
+### 2. GitOps merged in konflux-release-data
 
-**Navigate to Konflux Dashboard:**
+| Resource | Path |
+|----------|------|
+| Tenant Application/Component | `tenants-config/.../rhdr-tenant/fbc-fragments/4-22/fbc-4-22.yaml` |
+| Container stage RPA | `config/.../ReleasePlanAdmission/rhdr/rhdr-4-22-stage.yaml` |
+| FBC stage RPA | `config/.../ReleasePlanAdmission/rhdr/rhdr-fbc-4-22-stage.yaml` |
+| FBC ECP | `config/.../EnterpriseContractPolicy/fbc-rhdr-stage.yaml` |
 
-1. Go to: [Konflux Dashboard](https://console.redhat.com/hac)
-2. Select tenant: `rh-ocp-dr-tenant`
-3. Select application: `rhdr-4-22` (or applicable version)
-4. Click **"Create component"** button
+### 3. Catalog repo scaffolded
 
-**Fill in Component Details:**
+Repo: `rh-ocp-dr/rhdr-catalog` with layout:
 
-| Field | Value | Notes |
-|-------|-------|-------|
-| Component Name | `rhdr-fbc-catalog` | Matches repository name |
-| Git Repository | `https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-fbc-catalog.git` | Public URL to FBC repo |
-| Git Reference | `main` | Default branch |
-| Dockerfile | `Dockerfile` | At repo root |
-| Container Image | `quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog` | Registry path for output |
-
-**Screenshot Example:**
 ```
-┌─────────────────────────────────────────────────┐
-│ Create Component: RHDR FBC Catalog              │
-├─────────────────────────────────────────────────┤
-│ Component Name: [rhdr-fbc-catalog]              │
-│                                                 │
-│ Git Repository:                                 │
-│ [https://gitlab.cee.redhat.com/rh-ocp-dr/      │
-│  rhdr-fbc-catalog.git]                          │
-│                                                 │
-│ Git Reference: [main]                           │
-│                                                 │
-│ Dockerfile: [Dockerfile]                        │
-│                                                 │
-│ Container Image:                                │
-│ [quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog]      │
-│                                                 │
-│ Platform:  ☑ Linux  ☐ Windows                  │
-│                                                 │
-│ [Create] [Cancel]                              │
-└─────────────────────────────────────────────────┘
-```
-
-### Step 3: Configure Build Dependencies (Build Nudges)
-
-**Set build nudges to depend on bundle components:**
-
-1. In component details, click **"Edit"**
-2. Find **"Build nudges from"** section (or **"depends on"**)
-3. Add dependencies on bundle components:
-   - `rhdr-hub-operator-bundle`
-   - `rhdr-cluster-operator-bundle`
-   - `rhdr-multicluster-operator-bundle`
-   - `rhdr-csi-addons-operator-bundle` (if included)
-
-**Purpose:** Ensures FBC builds only after all bundles are available.
-
-**Example Patch Command** (if using YAML):
-```yaml
-apiVersion: appstudio.redhat.com/v1alpha1
-kind: Component
-metadata:
-  name: rhdr-fbc-catalog
-  namespace: rh-ocp-dr-tenant
-spec:
-  source:
-    git:
-      url: https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-fbc-catalog.git
-      revision: main
-  containerImage: quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog
-  dockerfile: Dockerfile
-  buildNudges:
-    - rhdr-hub-operator-bundle
-    - rhdr-cluster-operator-bundle
-    - rhdr-multicluster-operator-bundle
-    # - rhdr-csi-addons-operator-bundle (if applicable)
-```
-
-### Step 4: Trigger Initial Build
-
-**Via Konflux UI:**
-
-1. Go to component: `rhdr-fbc-catalog`
-2. Click **"Trigger build"** button
-3. Select trigger type: **"Push"** (or **"Manual"** for initial test)
-4. Monitor build progress in dashboard
-
-**Expected Timeline:**
-- Build preparation: ~2 minutes
-- Base image pull: ~1-2 minutes
-- FBC catalog generation: ~3-5 minutes
-- Image push to registry: ~2-3 minutes
-- **Total:** ~10-15 minutes
-
-**Verification After Build:**
-```bash
-# Check if FBC image was pushed
-podman pull quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:latest
-
-# List catalog contents
-podman run --rm quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:latest \
-  opm render quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:latest
-```
-
-### Step 5: Validate FBC Content
-
-**Verify bundles are included in catalog:**
-
-```bash
-# Export catalog index
-podman run --rm quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:latest \
-  opm render quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:latest > catalog-index.json
-
-# Check for expected operators
-grep -c "rhdr-hub-operator" catalog-index.json
-grep -c "rhdr-cluster-operator" catalog-index.json
-grep -c "rhdr-multicluster-operator" catalog-index.json
-
-# Expected output: each should find at least 1 match
-```
-
-**Inspect Specific Operator:**
-```bash
-podman run --rm quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:latest \
-  opm render quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:latest | \
-  jq '.[] | select(.name == "rhdr-hub-operator")'
+rhdr-catalog/
+├── Makefile
+├── bundle-images.env          # quay bundle digests
+├── image-mappings.env         # prod/stage/build registry map
+├── scripts/
+│   ├── gen-catalog.sh         # catalog regeneration
+│   ├── opm-container.sh       # opm wrapper
+│   └── update-bundle-json.sh  # wrapper → gen-catalog.sh
+├── v4.22/
+│   ├── catalog.Dockerfile
+│   └── catalog/
+│       ├── rhdr-hub-operator/
+│       ├── rhdr-cluster-operator/
+│       ├── rhdr-multicluster-operator/
+│       └── rhdr-csi-addons-operator/
+└── .tekton/
+    ├── rhdr-fbc-4-22-on-push.yaml
+    ├── rhdr-fbc-4-22-on-pull-request.yaml
+    └── images-mirror-set.yaml   # IDMS for FIPS check
 ```
 
 ---
 
-## Dockerfile Reference
+## Step-by-step: Local catalog workflow
 
-**Expected Dockerfile structure in `rhdr-fbc-catalog/Dockerfile`:**
+### Step 1: Log in to registries
+
+```bash
+podman login registry.redhat.io
+podman login quay.io   # or ensure ~/.config/containers/auth.json exists
+```
+
+### Step 2: Update bundle digests
+
+After each Konflux bundle build, update `bundle-images.env` with quay `@sha256` digests.
+Paths come from `rhdr-4-22.yaml` ImageRepository — do not use staging registry digests.
+
+```bash
+cd rhdr-catalog
+
+# Example per bundle (version tag varies per component)
+skopeo inspect --no-tags \
+  docker://quay.io/redhat-user-workloads/rhdr-tenant/rhdr/rhdr-hub-operator-bundle-4-22:v4.22.0-86 \
+  | jq -r '.Digest'
+```
+
+### Step 3: Regenerate, validate, build
+
+```bash
+make catalog-staging    # opm render from quay + registry rewrite to quay BUILD
+make validate           # opm validate catalog/
+make build              # podman build catalog image locally
+```
+
+### Step 4: Commit and push
+
+Push to `rh-ocp-dr/rhdr-catalog` `main` to trigger `rhdr-fbc-4-22-on-push`.
+
+### Step 5: Verify Konflux pipeline
+
+Expected pipeline tasks:
+
+1. `fbc-builder` — builds catalog image to quay
+2. `validate-fbc` — OCP 4.22 fragment validation (`olm.csv.metadata`)
+3. `fbc-fips-check-oci-ta` — relatedImages pull (IDMS fallback)
+4. `rhdr-fbc-4-22-enterprise-contract` — Conforma policy `fbc-rhdr-stage`
+
+---
+
+## Konflux component (already configured)
+
+GitOps in `fbc-fragments/4-22/fbc-4-22.yaml`:
+
+| Field | Value |
+|-------|-------|
+| Application | `rhdr-fbc-4-22` |
+| Component | `rhdr-fbc-4-22` |
+| Pipeline | `fbc-builder` (annotation required) |
+| Git URL | `https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-catalog` |
+| Context | `v4.22` |
+| Dockerfile | `catalog.Dockerfile` |
+| Output image | `quay.io/redhat-user-workloads/rhdr-tenant/rhdr-fbc/rhdr-fbc-4-22` |
+
+Integration test: `rhdr-fbc-4-22-enterprise-contract` with policy `rhtap-releng-tenant/fbc-rhdr-stage`.
+
+---
+
+## Catalog generation modes
+
+| Mode | Command | When |
+|------|---------|------|
+| **Staging (default)** | `make catalog-staging` | Development — quay BUILD pullspecs (allowed by `fbc-rhdr-stage` ECP) |
+| **Production** | `make catalog-production` | After `rhdr-4-22-stage` release — swap quay → `registry.stage.redhat.io` per RPA |
+
+Registry paths are never hardcoded in scripts. They come from `image-mappings.env`, derived from:
+
+- `pyxis-repo-configs/products/rhdr/rhdr.yaml` (prod)
+- `rhdr-4-22-stage` RPA (stage)
+- `rhdr-4-22.yaml` ImageRepository (quay BUILD)
+
+---
+
+## Dockerfile reference
+
+Actual `v4.22/catalog.Dockerfile`:
 
 ```dockerfile
-# Build FBC image from opm
-FROM quay.io/operator-framework/opm:latest as builder
-
-# Copy catalog directory structure
-COPY catalog /catalog
-
-# Generate OLM catalog from directory
-RUN opm render /catalog > /catalog.json && \
-    opm validate /catalog
-
-# Final image
-FROM quay.io/operator-framework/opm:latest
-
-COPY --from=builder /catalog.json /
-EXPOSE 50051
-
-ENTRYPOINT ["/opm", "serve", "/catalog.json"]
+FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.22
+ENTRYPOINT ["/bin/opm"]
+CMD ["serve", "/configs", "--cache-dir=/tmp/cache"]
+ADD catalog /configs
+RUN ["/bin/opm", "serve", "/configs", "--cache-dir=/tmp/cache", "--cache-only"]
+LABEL operators.operatorframework.io.index.configs.v1=/configs
 ```
 
 ---
 
 ## Troubleshooting
 
-### Issue 1: Build Fails - "Bundle not found"
+### `no policy.json file found` during `make catalog-staging`
 
-**Symptom:** Build log shows `Error: cannot find bundle quay.io/.../rhdr-hub-operator-bundle:TAG`
+`opm render` runs inside a container and must pull quay bundle images. Use `./scripts/opm-container.sh` (invoked by Makefile) — it mounts `policy.json` and registry auth.
 
-**Root Cause:** Bundle images not yet pushed to registry
+### `manifest unknown` on quay digest
 
-**Solution:**
-1. Verify bundle components completed successfully: `rhdr-hub-operator-bundle`, etc.
-2. Check registry push logs in each bundle component build
-3. Ensure bundle image path matches in `catalog/` directory
-4. Wait for bundle image to be available in registry (may take several minutes after build completion)
+The digest in `bundle-images.env` may be from `registry.stage.redhat.io` instead of quay. Resolve digests from quay version tags (`v4.22.0-86`, etc.).
 
-### Issue 2: FBC Doesn't Include All Operators
+### `validate-fbc` fails on `olm.bundle.object`
 
-**Symptom:** Only 2-3 operators show in catalog, not all 4
+OCP 4.22 requires `olm.csv.metadata`. Re-run `make catalog-staging` (uses `--migrate-level=bundle-object-to-csv-metadata`).
 
-**Root Cause:** `catalog/` directory missing subdirectories for some bundles
+### Conforma `olm.allowed_registries_related` violations
 
-**Solution:**
-1. Check `rhdr-fbc-catalog` repo has correct structure:
-   ```bash
-   ls -la catalog/
-   # Should show: rhdr-hub-operator/, rhdr-cluster-operator/, 
-   #              rhdr-multicluster-operator/, rhdr-csi-addons-operator/
-   ```
-2. Add missing subdirectories with bundle references
-3. Push changes and rebuild
+Catalog `relatedImages` should point to quay BUILD paths after `catalog-staging`. Legacy `registry.redhat.io/rh-ocp-dr/rhdr/*` paths in bundle CSVs are rewritten by `gen-catalog.sh`.
 
-### Issue 3: Build Nudge Not Triggering
+### FIPS check cannot pull images
 
-**Symptom:** FBC component not rebuilding when bundle components complete
-
-**Root Cause:** Build nudges not configured correctly
-
-**Solution:**
-1. Verify build nudges are set correctly on component
-2. Check component names exactly match (case-sensitive)
-3. Try manual trigger first: Komponente → "Trigger build"
-
-### Issue 4: Image Push Fails - Permission Denied
-
-**Symptom:** Build succeeds but fails at push: `Error: unauthorized: authentication required`
-
-**Root Cause:** Registry credentials not configured for component
-
-**Solution:**
-1. Check component has correct `quay.io` credentials
-2. Verify tenant `rh-ocp-dr-tenant` has `image-pull-secret`
-3. Contact tenant admin to grant push access to `quay.io/rh-ocp-dr/rhdr/`
+`.tekton/images-mirror-set.yaml` maps prod/stage paths to quay mirrors. Ensure `IDMS_PATH` is set in PAC PipelineRuns.
 
 ---
 
-## Integration Testing
+## Integration testing
 
-### Test 1: OLM Installation from FBC
-
-**Objective:** Verify FBC catalog works with OLM
+### OLM smoke test (after FBC stage release)
 
 ```bash
-# Create catalog source
-cat <<EOF | kubectl apply -f -
-apiVersion: operators.coreos.com/v1alpha1
-kind: CatalogSource
-metadata:
-  name: rhdr-catalog
-  namespace: openshift-marketplace
-spec:
-  sourceType: grpc
-  image: quay.io/rh-ocp-dr/rhdr/rhdr-fbc-catalog:latest
-  displayName: "Red Hat Disaster Recovery"
-  publisher: "Red Hat"
-EOF
-
-# Wait for catalog source to be ready
-kubectl wait --for=condition=Ready \
-  -n openshift-marketplace \
-  catalogsource/rhdr-catalog \
-  --timeout=5m
-
-# Verify operators appear in marketplace
 kubectl get packagemanifests -n openshift-marketplace | grep rhdr
 ```
 
-### Test 2: Install Operator from Catalog
+Expect: `rhdr-hub-operator`, `rhdr-cluster-operator`, `rhdr-multicluster-operator`, `rhdr-csi-addons-operator`.
+
+### Install from catalog (example)
 
 ```bash
-# Create namespace for operator
 kubectl create namespace ramen-system
 
-# Create subscription to rhdr-hub-operator
 cat <<EOF | kubectl apply -f -
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
@@ -380,54 +255,53 @@ metadata:
   name: rhdr-hub-operator
   namespace: ramen-system
 spec:
-  channel: alpha
+  channel: stable-4.22
   name: rhdr-hub-operator
-  source: rhdr-catalog
+  source: <catalog-source-name>
   sourceNamespace: openshift-marketplace
 EOF
-
-# Wait for operator installation
-kubectl wait --for=condition=Succeeded \
-  -n ramen-system \
-  installplan \
-  --timeout=5m \
-  --all
-
-# Verify operator pod is running
-kubectl get pods -n ramen-system | grep rhdr-hub-operator
 ```
 
 ---
 
-## Checklist Before Production
+## Checklist
 
-- [ ] FBC component created in Konflux UI
-- [ ] Build nudges configured correctly
-- [ ] First build completed successfully
-- [ ] FBC image pushed to registry
-- [ ] All expected operators present in catalog
-- [ ] OLM installation test successful
-- [ ] Operator pod starts and runs successfully
-- [ ] No errors in operator logs
-- [ ] Integration with hub/cluster operators verified
+### Catalog repo (`rhdr-catalog`)
+
+- [x] RHODF split JSON layout under `v4.22/catalog/`
+- [x] `Makefile` with `catalog-staging`, `validate`, `build`
+- [x] `gen-catalog.sh` + `bundle-images.env` + `image-mappings.env`
+- [x] Channel `stable-4.22`, OLM packages `rhdr-*`
+- [x] IDMS in `.tekton/images-mirror-set.yaml`
+- [x] PAC CEL triggers fixed (`rhdr-fbc-4-22-on-push.yaml`)
+- [ ] Konflux pipeline green (validate-fbc + Conforma)
+
+### GitOps (`konflux-release-data`)
+
+- [x] `rhdr-fbc-4-22` Application/Component with `fbc-builder`
+- [x] `fbc-rhdr-stage` ECP
+- [x] `rhdr-fbc-4-22-stage` RPA with `allowedPackages`
+- [x] `rhdr-4-22-stage` RPA for container images
+
+### Bundle repos
+
+- [x] OLM package rebrand to `rhdr-*` on `4.22` branch
+- [ ] All 4 bundles rebuilt and digests updated in `bundle-images.env`
 
 ---
 
-## Related Documentation
+## Related documentation
 
-- [ConstraintFileStages.md](./ConstraintFileStages.md) - Three stages of release configuration
-- [MULTI_COMPONENT_STRATEGY.md](../MULTI_COMPONENT_STRATEGY.md) - Component architecture details
-- [TENANT_NAMING_AND_FORK_STRATEGY.md](../TENANT_NAMING_AND_FORK_STRATEGY.md) - Repository naming and forking
-- [OLM/FBC Documentation](https://olm.operatorframework.io/docs/getting-started/) - Official OLM docs
-- [OPM Documentation](https://github.com/operator-framework/operator-registry) - OPM (Operator Package Manager) reference
+- [RHDRFBCApplicationGitOps.md](./RHDRFBCApplicationGitOps.md) — GitOps MR details and release config
+- [rhdr-catalog/README.md](https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-catalog/-/blob/main/README.md) — implementation and make targets
+- [OLM FBC docs](https://olm.operatorframework.io/docs/tasks/creating-a-catalog/)
 
 ---
 
-## Sign-Off
+## Sign-off
 
 | Role | Status |
 |------|--------|
 | **Author** | Nadav Levanon |
 | **Related JIRA** | [VIRTDR-141](https://redhat.atlassian.net/browse/VIRTDR-141) |
-| **Expected Completion** | Post component build completion |
-| **Last Updated** | 2026-05-31 |
+| **Last Updated** | 2026-07-13 |

@@ -2,6 +2,8 @@
 
 This guide covers how to access staging repositories, verify built images, and prepare deliverables for QE testing of RHDR (Red Hat Disaster Recovery) components.
 
+**Preferred QE path:** After the FBC release pipeline (`rhdr-fbc-4-22`) completes, deliver the **IIB index image** as a CatalogSource so QE can install all four operators from OperatorHub. See [FBC Release: IIB Index Image for QE](#fbc-release-iib-index-image-for-qe-recommended).
+
 ---
 
 ## Table of Contents
@@ -9,9 +11,10 @@ This guide covers how to access staging repositories, verify built images, and p
 1. [Network & VPN Setup](#network--vpn-setup)
 2. [Accessing the Staging Registry](#accessing-the-staging-registry)
 3. [Verifying Built Images](#verifying-built-images)
-4. [Delivering to QE](#delivering-to-qe)
-5. [Checking Build Status](#checking-build-status)
-6. [Troubleshooting](#troubleshooting)
+4. [FBC Release: IIB Index Image for QE (Recommended)](#fbc-release-iib-index-image-for-qe-recommended)
+5. [Delivering to QE](#delivering-to-qe)
+6. [Checking Build Status](#checking-build-status)
+7. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -367,7 +370,7 @@ operator-sdk run bundle \
   -n <test-namespace>
 ```
 
-**To use CatalogSource:** You must first build an index image from the mirrored bundles using `opm index add`, then point CatalogSource at the index image (not the bundle).
+**To use CatalogSource:** After FBC release, point CatalogSource at the **IIB index image** from the Release CR. For legacy workflows without FBC, build an index image from mirrored bundles using `opm index add`, then point CatalogSource at the index image (not the bundle).
 
 ### Mirroring Output Files
 
@@ -450,6 +453,8 @@ bash output/podman-pull-20260629-212803.sh
 ---
 
 ## Deploying CatalogSource to OpenShift Cluster
+
+> **Preferred:** If the FBC release has completed, use the IIB index image from `status.artifacts.index_image` — see [FBC Release: IIB Index Image for QE](#fbc-release-iib-index-image-for-qe-recommended). The steps below cover manual index builds and legacy per-bundle workflows.
 
 ### Important: Cluster-Level Authentication Required
 
@@ -616,9 +621,18 @@ Understanding where images go at each stage helps troubleshoot issues:
 └─────────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│ Stage 3: Ready for QE Testing                                   │
-│ Images: registry.stage.redhat.io/rhdr/...                       │
-│ Deliver: Pullspecs from Konflux Artifacts page                  │
+│ Stage 3: FBC Release Pipeline (rhdr-fbc-4-22)                   │
+│ Input: Operator bundles from registry.stage.redhat.io           │
+│ Output: IIB index image (registry-proxy.../rh-osbs/iib:<id>)    │
+│ Access: Red Hat VPN; mirror to quay.io for external QE          │
+│ Timeline: 30-60 minutes after Stage 2                           │
+│ QE deliverable: status.artifacts.index_image on Release CR      │
+└─────────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Stage 4: Ready for QE Testing                                   │
+│ Preferred: IIB index → CatalogSource → OperatorHub install      │
+│ Fallback:  registry.stage.redhat.io/rhdr/... individual images  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -628,6 +642,7 @@ Understanding where images go at each stage helps troubleshoot issues:
 |-------|---------------|---------|
 | **Build Output** (redhat-user-workloads) | Extract ServiceAccount secrets | `kubectl get secret <pull-secret> -o jsonpath='{.data.\.dockerconfigjson}'` |
 | **Staging (registry.stage.redhat.io)** | Terms-based registry SA | `podman login registry.stage.redhat.io` |
+| **FBC IIB Index** | Release CR nested `index_image.v4.22` | `oc get release <name> -n rhdr-tenant -o json \| jq -r '.status.artifacts.index_image["v4.22"].index_image_resolved'` |
 | **Release Artifacts** | `extract-release-artifacts.sh` script | `./extract-release-artifacts.sh rhdr-tenant` |
 | **Verify Published** | Konflux Artifacts page | Navigate to Releases → Artifacts |
 
@@ -650,9 +665,351 @@ podman pull registry.stage.redhat.io/rhdr/rhdr-csi-addons-operator-bundle:v4.22
 
 ---
 
+## FBC Release: IIB Index Image for QE (Recommended)
+
+After the **FBC release pipeline** (`rhdr-fbc-4-22`) completes, Konflux produces a **staged IIB index image** that contains all four RHDR operator packages in a single OLM catalog. This is the preferred QE deliverable — QE installs operators through OperatorHub instead of pulling individual bundles or running `operator-sdk run bundle` per operator.
+
+### How the FBC Release Works
+
+The staging RPA (`rhdr-fbc-4-22-stage`) is configured with:
+
+| Setting | Value | Meaning |
+|---------|-------|---------|
+| `stagedIndex` | `true` | Pipeline builds an isolated index image via IIB |
+| `fromIndex` | `registry-proxy.engineering.redhat.com/rh-osbs/iib-pub-pending:v4.22` | Base catalog IIB adds packages to |
+| `targetIndex` | `''` (empty) | Does **not** update the shared `iib-pub-pending` catalog |
+| `allowedPackages` | hub, cluster, multicluster, csi-addons | All four RHDR operators in one index |
+
+The output is a **unique index image** (build-ID tagged) containing all four packages. OLM discovers every RHDR operator from this single catalog source.
+
+### Step 1: Find the IIB Index Image Pullspec
+
+#### Method A: From the Release CR (CLI)
+
+```bash
+# Find the latest successful FBC release
+oc get release -n rhdr-tenant \
+  -l appstudio.openshift.io/application=rhdr-fbc-4-22 \
+  --sort-by=.metadata.creationTimestamp | tail -1
+
+# Extract the staged index image pullspec (FBC release structure is nested under v4.22)
+RELEASE_NAME="<release-name-from-above>"
+oc get release "$RELEASE_NAME" -n rhdr-tenant -o json | \
+  jq -r '.status.artifacts.index_image["v4.22"].index_image_resolved // .status.artifacts.components[0].index_image_resolved'
+```
+
+Example output:
+
+```
+registry-proxy.engineering.redhat.com/rh-osbs/iib:123456
+```
+
+Save this pullspec — it is the single artifact QE needs for OperatorHub-style testing.
+
+#### Method B: From the Konflux UI
+
+1. Navigate to **Applications** → **rhdr-fbc-4-22** → **Releases**
+2. Open the latest release targeting **stage**
+3. Open the **Managed pipeline** for that release
+4. Find the **`iibIndexImage`** field — that is the index image pullspec
+
+### Step 2: Choose a Delivery Path (VPN vs No VPN)
+
+The IIB index image is served from `registry-proxy.engineering.redhat.com`, which requires **Red Hat VPN** (or corporate network) access. QE test clusters must either have VPN connectivity **or** you must mirror the index image to a registry QE can reach.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    FBC Release Complete                              │
+│         index_image: registry-proxy.../rh-osbs/iib:<build-id>       │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+              ┌─────────────────┴─────────────────┐
+              │                                   │
+    ┌─────────▼──────────┐            ┌──────────▼──────────┐
+    │  Path A: With VPN   │            │ Path B: Without VPN │
+    │  (Red Hat internal) │            │ (External QE labs)  │
+    └─────────┬──────────┘            └──────────┬──────────┘
+              │                                   │
+    CatalogSource points at              Mirror index with skopeo
+    registry-proxy.../iib:<id>           to quay.io (or other registry)
+              │                                   │
+    QE cluster needs VPN                   CatalogSource points at mirror
+    to pull index image                    (no VPN required)
+```
+
+| | **Path A: With VPN** | **Path B: Without VPN** |
+|---|---|---|
+| **When to use** | QE clusters on Red Hat VPN or corporate network | External labs, cloud clusters without VPN |
+| **Index location** | `registry-proxy.engineering.redhat.com/rh-osbs/iib:<build-id>` | `quay.io/<org>/rhdr-fbc-index:<tag>` (mirrored) |
+| **Prerequisites** | Red Hat VPN + proxy configured | `skopeo`, VPN on **your** machine to pull source |
+| **CatalogSource image** | IIB pullspec directly | Mirrored pullspec |
+| **ImagePullSecret** | Usually not needed on VPN clusters | Depends on mirror registry (public quay.io often needs none) |
+
+---
+
+### Path A: Deliver to QE With VPN Access
+
+Use this when QE test clusters can reach `registry-proxy.engineering.redhat.com`.
+
+#### A.1 Verify You Can Pull the Index Image
+
+```bash
+# Ensure VPN and proxy are configured (see Network & VPN Setup)
+export HTTP_PROXY=http://squid.corp.redhat.com:3128
+export HTTPS_PROXY=http://squid.corp.redhat.com:3128
+
+INDEX_IMAGE="registry-proxy.engineering.redhat.com/rh-osbs/iib:<build-id>"
+
+# Verify pull works
+podman pull "$INDEX_IMAGE"
+```
+
+#### A.2 Create CatalogSource on the QE Cluster
+
+```yaml
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: rhdr-staging-catalog
+  namespace: openshift-marketplace
+spec:
+  sourceType: grpc
+  image: registry-proxy.engineering.redhat.com/rh-osbs/iib:<build-id>
+  displayName: RHDR Staging Catalog
+  publisher: Red Hat
+  updateStrategy:
+    registryPoll:
+      interval: 10m
+```
+
+Apply and verify:
+
+```bash
+kubectl apply -f rhdr-staging-catalog.yaml
+
+# Wait for catalog pod to become ready (1–3 minutes)
+kubectl get catalogsource rhdr-staging-catalog -n openshift-marketplace
+kubectl get pods -n openshift-marketplace -l olm.catalogSource=rhdr-staging-catalog
+
+# Confirm all four packages are visible
+kubectl get packagemanifests -n openshift-marketplace | grep rhdr
+```
+
+Expected packages:
+
+- `rhdr-hub-operator`
+- `rhdr-cluster-operator`
+- `rhdr-multicluster-operator`
+- `rhdr-csi-addons-operator`
+
+#### A.3 What to Send QE
+
+Include in your delivery document:
+
+1. **Index image pullspec** (from Release CR `status.artifacts.index_image`)
+2. **CatalogSource YAML** (above, with the pullspec filled in)
+3. **Release name and build date** (for traceability)
+4. **Note:** Cluster must have Red Hat VPN connectivity to pull from `registry-proxy.engineering.redhat.com`
+5. **Install instructions:** After CatalogSource is ready, install operators from **OperatorHub** → filter by "RHDR" or "Disaster Recovery"
+
+---
+
+### Path B: Deliver to QE Without VPN Access
+
+Use this when QE clusters cannot reach Red Hat internal registries. You mirror artifacts to a publicly reachable registry (typically `quay.io`).
+
+#### What Must Be Mirrored? (Important)
+
+Mirroring **only the IIB index image is not enough** for end-to-end operator install. The index is a catalog pointer — it does not contain the operator payloads.
+
+When QE installs from OperatorHub, OLM performs **three separate pull steps**:
+
+```
+CatalogSource pod          Operator install            Pod deployment
+      │                           │                          │
+      ▼                           ▼                          ▼
+  Index image              Bundle images            Operator + related images
+  (quay.io mirror)    registry.stage.redhat.io   registry.stage.redhat.io
+                      /rhdr/*-operator-bundle    /rhdr/*-operator, sidecar, etc.
+```
+
+| Artifact | Stored in index? | Typical location | Mirror needed for no-VPN? |
+|----------|------------------|------------------|---------------------------|
+| **Index image** | — | `registry-proxy.../rh-osbs/iib:<id>` | **Yes** → point CatalogSource at quay.io copy |
+| **Bundle images** (×4) | Referenced by index | `registry.stage.redhat.io/rhdr/*-operator-bundle` | **Yes** |
+| **Operator images** | Referenced inside bundles (CSV) | `registry.stage.redhat.io/rhdr/*-operator`, sidecar, console, etc. | **Yes** |
+| **Related images** | Referenced inside bundles (CSV `relatedImages`) | `registry.stage.redhat.io/rhdr/...` | **Yes** |
+
+The index image on quay.io still contains **original** `registry.stage.redhat.io/rhdr/...` paths for bundles. Mirroring the index does not rewrite those references. Without mirroring the underlying images **and** redirecting pulls on the cluster, QE may see operators in OperatorHub but **install will fail** when OLM tries to pull bundles or operator images from staging.
+
+**Complete no-VPN delivery requires all three:**
+
+1. Mirror the **IIB index** to quay.io (CatalogSource points here)
+2. Mirror **bundles + operator + related images** from staging to quay.io — including **prod-path aliases** (`rhdr-hub-rhel9-operator`, etc.) because bundle CSVs reference `registry.redhat.io/rhdr/*`
+3. Apply an **ImageDigestMirrorSet** on the QE cluster for **both** `registry.stage.redhat.io/rhdr` and `registry.redhat.io/rhdr`
+
+**Recommended:** use the automated script (in `rhdr-catalog`):
+
+```bash
+# From rhdr-catalog repo (or Docs wrapper):
+cd rhdr-catalog
+make prepare-qe-delivery-mirror
+# Output: rhdr-catalog/qe-delivery-output/rhdr-qe-<timestamp>-{idms,catalogsource,README}.yaml
+
+# Or extract YAML only (no registry access):
+make prepare-qe-delivery
+```
+
+The script handles:
+- FBC IIB index discovery from Release CR
+- All 9 staging components with correct staging repo names (e.g. `rhdr-multicluster-rhel9-operator`)
+- Prod-path alias pushes for hub/cluster operator (same digest as `rhdr-ramen-operator-base-image-rhel9`)
+- IDMS for both staging and production registry paths
+- CatalogSource pointing at mirrored index
+
+#### B.1 Mirror All Required Images (Manual Alternative)
+
+You need VPN access locally to pull from `registry-proxy` and `registry.stage.redhat.io`; QE does not.
+
+**Step 1 — Mirror the IIB index:**
+
+```bash
+# Prerequisites: VPN + proxy configured, logged into quay.io
+export HTTP_PROXY=http://squid.corp.redhat.com:3128
+export HTTPS_PROXY=http://squid.corp.redhat.com:3128
+
+podman login quay.io
+
+SOURCE_INDEX="registry-proxy.engineering.redhat.com/rh-osbs/iib:<build-id>"
+MIRROR_INDEX="quay.io/openshift-virtualization-dr/rhdr-mirror:fbc-index-<release-tag>"
+
+skopeo copy --all \
+  "docker://${SOURCE_INDEX}" \
+  "docker://${MIRROR_INDEX}"
+```
+
+**Step 2 — Mirror bundles and operator images from staging:**
+
+```bash
+# Login to staging registry (terms-based service account)
+podman login registry.stage.redhat.io
+podman login quay.io
+
+# Mirror all 9 component images to quay.io (bundles + operators + sidecar + console + base image)
+./extract-release-artifacts.sh rhdr-tenant 10 true
+```
+
+This mirrors images to `quay.io/openshift-virtualization-dr/rhdr-mirror:<image>-staging` (single public repo). The script generates per-image IDMS entries mapping staging/prod paths to that repo.
+
+**Step 3 — Provide IDMS to QE** (maps each staging/prod image path to the single mirror repo):
+
+The script generates per-image entries automatically. All paths resolve to digest pulls inside `quay.io/openshift-virtualization-dr/rhdr-mirror`:
+
+```yaml
+apiVersion: config.openshift.io/v1
+kind: ImageDigestMirrorSet
+metadata:
+  name: rhdr-staging-mirror
+spec:
+  imageDigestMirrors:
+    - source: registry.stage.redhat.io/rhdr/rhdr-hub-operator-bundle
+      mirrors:
+        - quay.io/openshift-virtualization-dr/rhdr-mirror
+    - source: registry.redhat.io/rhdr/rhdr-hub-rhel9-operator
+      mirrors:
+        - quay.io/openshift-virtualization-dr/rhdr-mirror
+    # ... one entry per bundle/operator path (see script output)
+```
+
+Both staging and production paths are required. OLM pulls by digest inside the single public repo.
+
+QE applies this **before** installing operators. OLM continues to resolve paths from the index/CSVs as `registry.stage.redhat.io/rhdr/...`, but the cluster pulls from quay.io instead.
+
+Use a meaningful tag for the index, e.g. `v4.22-20260714` or the IIB build ID.
+
+#### B.2 Create CatalogSource Pointing at the Mirrored Index
+
+```yaml
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: rhdr-staging-catalog
+  namespace: openshift-marketplace
+spec:
+  sourceType: grpc
+  image: quay.io/openshift-virtualization-dr/rhdr-mirror:fbc-index-<release-tag>
+  displayName: RHDR Staging Catalog
+  publisher: Red Hat
+  updateStrategy:
+    registryPoll:
+      interval: 10m
+```
+
+If the quay.io repository is **private**, QE must create an ImagePullSecret:
+
+```bash
+kubectl create secret docker-registry rhdr-quay-pull-secret \
+  --docker-server=quay.io \
+  --docker-username=<quay-username> \
+  --docker-password=<quay-token> \
+  -n openshift-marketplace
+
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets": [{"name": "rhdr-quay-pull-secret"}]}' \
+  -n openshift-marketplace
+```
+
+#### B.3 What to Send QE
+
+1. **Mirrored index image pullspec** (`quay.io/.../rhdr-fbc-index:<tag>`)
+2. **CatalogSource YAML** (above)
+3. **ImageDigestMirrorSet YAML** (above — **required** so bundle/operator pulls reach quay.io)
+4. **Confirmation that staging images were mirrored** (output of `./extract-release-artifacts.sh ... true`)
+5. **ImagePullSecret instructions** (only if quay.io repos are private)
+6. **Release name, build date, and source IIB build ID** (for traceability)
+7. **Apply order:** IDMS first → CatalogSource → wait for packages → install from OperatorHub
+8. **No VPN required** on the QE cluster (if index + all staging images are mirrored and IDMS is applied)
+
+#### B.4 Minimal Mirror (Index Only) — When It Is / Isn't Enough
+
+| Scenario | Mirror index only? | Also mirror staging images? | IDMS needed? |
+|----------|-------------------|----------------------------|--------------|
+| QE cluster has VPN + staging registry access | No — use Path A | No | No |
+| QE sees OperatorHub packages but cannot install | Yes (already done) | **Yes** | **Yes** |
+| QE has no VPN, full OperatorHub install | Yes | **Yes** | **Yes** |
+| QE tests one operator via `operator-sdk run bundle` | No | Mirror that bundle + its operator images | Optional |
+
+---
+
+### FBC QE Delivery Checklist
+
+Use this checklist each time an FBC release completes:
+
+- [ ] FBC release pipeline succeeded (`rhdr-fbc-4-22` application)
+- [ ] Extracted `status.artifacts.index_image` from Release CR
+- [ ] Verified index image pull works (with VPN on your machine)
+- [ ] Confirmed all 4 packages appear after CatalogSource deploy (`kubectl get packagemanifests | grep rhdr`)
+- [ ] Chose delivery path (A: VPN direct, B: mirror to quay.io)
+- [ ] Prepared delivery document with pullspec, CatalogSource YAML, and install notes
+- [ ] (Path B only) Mirrored **index + all staging images** to quay.io
+- [ ] (Path B only) Included **ImageDigestMirrorSet** in QE delivery package
+- [ ] (Path B only) Verified operator install end-to-end from a non-VPN cluster
+
+### FBC vs Individual Image Delivery
+
+| Approach | When to Use | QE Experience |
+|----------|-------------|---------------|
+| **FBC IIB index (this section)** | FBC release pipeline has run; you want standard OperatorHub install | Install all 4 operators from OperatorHub |
+| **Individual bundle pullspecs** | Component-only testing, or FBC not yet available | Pull specific images; use `operator-sdk run bundle` |
+| **Mirror individual images to quay.io** | QE without VPN, component-level testing | Pull from public mirror; manual per-operator install |
+
+> **Note:** The `extract-release-artifacts.sh` script generates per-component pullspecs and a legacy CatalogSource YAML that points at a **bundle** image — that is incorrect for OLM catalog use. After FBC release, use the **IIB index image** from `status.artifacts.index_image` instead.
+
+---
+
 ## Delivering to QE
 
-You have several options for delivering built images to QE without needing a full FBC (File-Based Catalog).
+You have several options for delivering built images to QE. **If the FBC release pipeline has completed, use the [IIB index image approach](#fbc-release-iib-index-image-for-qe-recommended) above** — it is the preferred method for full operator catalog testing.
 
 ### Option 1: Direct Image Pull (Simplest)
 
@@ -747,7 +1104,69 @@ spec:
 
 ### Recommended Delivery Format
 
-Prepare a **delivery document** for QE with the following structure:
+Prepare a **delivery document** for QE with the following structure.
+
+#### FBC / IIB Index Delivery (Preferred)
+
+Use this template when the FBC release pipeline has completed:
+
+```markdown
+# RHDR FBC Staging Catalog Delivery - [DATE]
+
+## Build Information
+
+- **FBC Release:** [name from Release object, e.g. rhdr-fbc-4-22-...]
+- **Konflux Application:** rhdr-fbc-4-22
+- **Konflux Workspace:** rhdr-tenant
+- **Build Date:** [YYYY-MM-DD]
+- **Status:** FBC release succeeded ✅
+
+## IIB Index Image
+
+| Field | Value |
+|-------|-------|
+| Index pullspec | `registry-proxy.engineering.redhat.com/rh-osbs/iib:<build-id>` |
+| Mirrored pullspec (if applicable) | `quay.io/openshift-virtualization-dr/rhdr-fbc-index:<tag>` |
+| VPN required | Yes (source index) / No (if mirrored) |
+
+Extract with:
+\`\`\`bash
+oc get release <release-name> -n rhdr-tenant -o yaml | yq '.status.artifacts.index_image'
+\`\`\`
+
+## Operators in Catalog
+
+- rhdr-hub-operator
+- rhdr-cluster-operator
+- rhdr-multicluster-operator
+- rhdr-csi-addons-operator
+
+## Deploy CatalogSource
+
+\`\`\`yaml
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: rhdr-staging-catalog
+  namespace: openshift-marketplace
+spec:
+  sourceType: grpc
+  image: <INDEX-PULLSPEC>
+  displayName: RHDR Staging Catalog
+  publisher: Red Hat
+\`\`\`
+
+## Install Operators
+
+1. Apply CatalogSource YAML above
+2. Wait for catalog pod ready: \`kubectl get catalogsource rhdr-staging-catalog -n openshift-marketplace\`
+3. Open **OperatorHub** → search "RHDR" or "Disaster Recovery"
+4. Install desired operators into target namespace
+```
+
+#### Individual Component Delivery (Fallback)
+
+Use this template when FBC is not available or QE needs specific component digests:
 
 ```markdown
 # RHDR Staging Build Delivery - [DATE]
@@ -780,42 +1199,15 @@ podman pull registry.stage.redhat.io/rhdr/rhdr-hub-rhel9-operator:v4.22
 \`\`\`
 
 ### Option B: OLM Testing with operator-sdk (No index image needed)
-```bash
-# Deploy operator directly from bundle
+\`\`\`bash
 operator-sdk run bundle \
   registry.stage.redhat.io/rhdr/rhdr-cluster-operator-bundle:v4.22 \
   --pull-secret-name rhdr-staging-pull-secret \
   -n <test-namespace>
-
-# Clean up
-operator-sdk cleanup rhdr-cluster-operator -n <test-namespace>
-```
-
-**Or, for reusable CatalogSource:** Build an index image first with `opm index add`, then create a CatalogSource pointing at the INDEX image (not the bundle):
-```yaml
-apiVersion: operators.coreos.com/v1alpha1
-kind: CatalogSource
-metadata:
-  name: rhdr-staging-catalog
-  namespace: openshift-marketplace
-spec:
-  sourceType: grpc
-  image: quay.io/<your-org>/rhdr-test-index:latest
-```
-
-### Option C: Cluster-Wide Image Redirection
-Apply this manifest to transparently redirect all `registry.redhat.io/rhdr` pulls to staging:
-\`\`\`yaml
-apiVersion: config.openshift.io/v1
-kind: ImageDigestMirrorSet
-metadata:
-  name: rhdr-staging-mirror
-spec:
-  imageDigestMirrors:
-    - source: registry.redhat.io/rhdr
-      mirrors:
-        - registry.stage.redhat.io/rhdr
 \`\`\`
+
+### Option C: FBC IIB CatalogSource (if FBC release available)
+See VerifyBuildImages.md — use `status.artifacts.index_image` from the FBC Release CR.
 
 ## Registry Access
 
@@ -1088,9 +1480,58 @@ curl -x http://squid.corp.redhat.com:3128 https://www.dev.redhat.com/
 
 ---
 
+### IIB Index Image Pull Fails or CatalogSource Not Ready
+
+**Symptoms:**
+- `podman pull registry-proxy.engineering.redhat.com/rh-osbs/iib:<id>` times out
+- CatalogSource pod in `ImagePullBackOff` or `ErrImagePull`
+- No RHDR packages in `kubectl get packagemanifests`
+
+**Cause:** Cluster or workstation lacks VPN access to `registry-proxy.engineering.redhat.com`.
+
+**Fix:**
+
+1. **Verify VPN on the machine pulling the image** (your workstation for mirroring, or the cluster nodes for direct deploy)
+2. **If QE has no VPN:** Mirror the index **and** all staging bundle/operator images, then apply ImageDigestMirrorSet (see [Path B: Without VPN](#path-b-deliver-to-qe-without-vpn-access))
+3. **If packages appear but install fails with `ImagePullBackOff` on bundle/operator images:** Staging images were not mirrored or IDMS is missing — mirror with `./extract-release-artifacts.sh rhdr-tenant 10 true` and apply IDMS
+4. **Verify the FBC release succeeded:**
+   ```bash
+   oc get release -n rhdr-tenant -l appstudio.openshift.io/application=rhdr-fbc-4-22
+   oc get release <name> -n rhdr-tenant -o yaml | yq '.status.artifacts.index_image'
+   ```
+4. **Check CatalogSource pod logs:**
+   ```bash
+   kubectl get pods -n openshift-marketplace -l olm.catalogSource=rhdr-staging-catalog
+   kubectl logs -n openshift-marketplace -l olm.catalogSource=rhdr-staging-catalog
+   ```
+
+**Do not** point CatalogSource at a bundle image (`*-operator-bundle`) — OLM requires an **index image**. Use the IIB output from the FBC release, or build one manually with `opm index add`.
+
+---
+
 ## Quick Reference
 
-### Commands for Staging Access
+### Commands for FBC / IIB Index (Preferred QE Path)
+
+```bash
+# Complete QE package (recommended) — from rhdr-catalog:
+make prepare-qe-delivery-mirror          # mirror index + images + generate IDMS/CatalogSource
+make prepare-qe-delivery                 # extract YAML only (no registry access)
+
+# Or from Docs/TestingBuildsDeliverables:
+./prepare-qe-delivery.sh --mirror
+
+# Manual: find latest FBC release
+oc get release -n rhdr-tenant \
+  -l appstudio.openshift.io/application=rhdr-fbc-4-22 \
+  --sort-by=.metadata.creationTimestamp | tail -1
+
+# Manual: extract IIB index image pullspec
+oc get release <release-name> -n rhdr-tenant -o json | \
+  jq -r '.status.artifacts.index_image["v4.22"].index_image_resolved // .status.artifacts.components[0].index_image_resolved'
+```
+
+### Commands for Staging Access (Individual Images)
 
 ```bash
 # 1. Extract all published images from your releases (START HERE)

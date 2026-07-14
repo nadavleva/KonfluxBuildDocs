@@ -1,15 +1,15 @@
 # RHDR FBC Application — GitOps Setup Guide
 
-**Status:** In progress — bundle rebrand complete, awaiting Konflux rebuilds and MR merges  
-**Pattern reference:** RHODF `rhodf/konflux/rhodf-fbc` (per-version subdirectory) — **not** RHWA multi-version `ProjectDevelopmentStream`  
+**Status:** Implemented — catalog tooling, IDMS, and local make targets verified; Konflux pipeline validation in progress  
+**Pattern reference:** RHODF `rhodf/konflux/rhodf-fbc` (per-version subdirectory) + RHWA registry rewrite workflow  
 **Konflux tenant:** `rhdr-tenant` on `stone-prod-p02`  
-**Related:** [RHDRCatalog.md](./RHDRCatalog.md), [RHDRReleasePlanAdmissionRequirements.md](./RHDRReleasePlanAdmissionRequirements.md)
+**Related:** [CreateRHDRFBCApplication.md](./CreateRHDRFBCApplication.md), [RHDRCatalog.md](./RHDRCatalog.md), [RHDRReleasePlanAdmissionRequirements.md](./RHDRReleasePlanAdmissionRequirements.md)
 
 ---
 
 ## Overview
 
-RHDR is a **Tech Preview** product with a **single active version** (`4.22`). There is **no upgrade path** in the FBC catalog: each operator has one `stable` channel entry and one bundle reference. Updates replace the bundle digest — no `replaces` / `skipRange` chains.
+RHDR is a **Tech Preview** product with a **single active version** (`4.22`). There is **no upgrade path** in the FBC catalog: each operator has one `stable-4.22` channel entry and one bundle reference. Updates replace the bundle digest — no `replaces` / `skipRange` chains.
 
 The **File-Based Catalog (FBC)** aggregates **four** RHDR operator bundles into one OLM catalog image. After release via the `fbc-release` pipeline, the catalog fragment is submitted to IIB and published to the Red Hat operator index.
 
@@ -70,17 +70,21 @@ RHDR needs **two** ReleasePlanAdmission resources for **two** Konflux applicatio
 ```mermaid
 flowchart TB
   subgraph T1["Track 1: rhdr-4-22 (9 components)"]
-    B1[Component builds] --> R1[rh-advisories release]
+    B1[Component builds on quay] --> R1[rh-advisories release]
     R1 --> REG["registry.stage.redhat.io/rhdr/*"]
   end
 
-  subgraph manual["Manual: rhdr-fbc Git repo"]
-    REG --> CAT[Update bundle @sha256 in catalog.json]
+  subgraph catalog["rhdr-catalog repo"]
+    Q["quay BUILD bundles\nbundle-images.env"] --> GS["make catalog-staging\ngen-catalog.sh"]
+    GS --> CAT["v4.22/catalog JSON\nquay pullspecs"]
+    REG -.->|make catalog-production| CAT2["registry.stage pullspecs"]
   end
 
   subgraph T2["Track 2: rhdr-fbc-4-22"]
     CAT --> B2[fbc-builder build]
-    B2 --> EC[fbc-rhdr-stage Conforma]
+    B2 --> VF[validate-fbc]
+    VF --> FIPS[fbc-fips-check + IDMS]
+    FIPS --> EC[fbc-rhdr-stage Conforma]
     EC --> R2[fbc-release → IIB]
     R2 --> IDX[Operator index]
   end
@@ -88,10 +92,12 @@ flowchart TB
   IDX --> OLM[OperatorHub / OLM install]
 ```
 
-1. **Track 1** releases bundle images to the staging registry.
-2. **You** copy bundle digests into `rhdr-fbc/v4.22/catalog/*/bundles/*.json`.
-3. **Track 2** builds the catalog image and publishes the index fragment.
-4. Controller, sidecar, ramen, and console images are pulled via `relatedImages` when users install operators — they are **not** separate FBC packages.
+1. **Track 1** builds and releases container images to the staging registry.
+2. **Catalog repo** regenerates FBC JSON from quay BUILD bundles (`make catalog-staging`) during development.
+3. **Track 2** builds the catalog image, runs Conforma, and publishes the index fragment.
+4. After stage release, optionally run `make catalog-production` to swap quay → `registry.stage.redhat.io` pullspecs.
+
+Controller, sidecar, ramen, and console images are pulled via `relatedImages` — they are **not** separate FBC packages.
 
 ---
 
@@ -99,29 +105,38 @@ flowchart TB
 
 Create **`https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-catalog`** (or `rh-ocp-dr/rhdr-fbc` if your group policy requires it — keep URL consistent with the Konflux `Component` spec).
 
-### Repository layout (RHODF single-version pattern)
+### Repository layout (RHODF single-version + RHWA registry tooling)
 
 ```
-rhdr-fbc/
+rhdr-catalog/
+├── Makefile
+├── bundle-images.env              # quay @sha256 digests (4 bundle components)
+├── image-mappings.env             # prod/stage/build registry map (no guessed paths)
+├── README.md
+├── scripts/
+│   ├── gen-catalog.sh             # --mode=staging | --mode=production
+│   ├── opm-container.sh           # opm wrapper (auth + policy.json)
+│   └── update-bundle-json.sh      # wrapper → gen-catalog.sh
 ├── v4.22/
 │   ├── catalog.Dockerfile
 │   └── catalog/
 │       ├── rhdr-hub-operator/
 │       │   ├── package.json
-│       │   ├── channels/stable.json
-│       │   └── bundles/rhdr-hub-operator.v4.22.0.json
+│       │   ├── channels/stable-4.22.json
+│       │   └── bundles/*.json
 │       ├── rhdr-cluster-operator/ …
 │       ├── rhdr-multicluster-operator/ …
 │       └── rhdr-csi-addons-operator/ …
 └── .tekton/
     ├── rhdr-fbc-4-22-on-push.yaml
-    └── rhdr-fbc-4-22-on-pull-request.yaml
+    ├── rhdr-fbc-4-22-on-pull-request.yaml
+    └── images-mirror-set.yaml     # IDMS for FIPS check
 ```
 
 **Reference repos:**
 
-- RHWA: [dragonfly/rhwa-fbc](https://gitlab.cee.redhat.com/dragonfly/rhwa-fbc) — per-version Containerfiles on `main`
-- RHODF: [rhodf/konflux/rhodf-fbc](https://gitlab.cee.redhat.com/rhodf/konflux/rhodf-fbc) — `v4.22/` subdirectories
+- RHWA: [dragonfly/rhwa-fbc](https://gitlab.cee.redhat.com/dragonfly/rhwa-fbc) — registry rewrite (`fix_prod_image` / staging workflow)
+- RHODF: [rhodf/konflux/rhodf-fbc](https://gitlab.cee.redhat.com/rhodf/konflux/rhodf-fbc) — `v4.22/` split JSON layout
 
 ### `catalog.Dockerfile` (in `v4.22/`)
 
@@ -136,13 +151,26 @@ LABEL operators.operatorframework.io.index.configs.v1=/configs
 
 ### Declarative catalog (`v4.22/catalog/`)
 
-Per operator package directory: `package.json`, `channels/stable.json` (single entry, no upgrade), and `bundles/*.json` with staging registry digest pullspecs.
+Per operator package directory: `package.json`, `channels/stable-4.22.json` (single entry, no upgrade), and `bundles/*.json`.
 
-Validate: `cd v4.22 && opm validate catalog/`
+**Do not hand-edit bundle JSON.** Regenerate with:
+
+```bash
+# Update bundle-images.env with quay digests first
+make catalog-staging
+make validate
+make build
+```
+
+`gen-catalog.sh --mode=staging`:
+
+- Renders from quay bundle images (`bundle-images.env`)
+- Converts `olm.bundle.object` → `olm.csv.metadata` (OCP 4.22)
+- Rewrites prod/stage/legacy registry refs → quay BUILD per `image-mappings.env`
+
+Registry paths in `image-mappings.env` are derived only from `rhdr.yaml`, `rhdr-4-22-stage` RPA, and `rhdr-4-22.yaml`.
 
 ### Tekton PAC
-
-Copy `.tekton/rhodf-fbc-4-22-on-push.yaml` or `rhwa-fbc-422` PAC files and set:
 
 | Field | Value |
 |-------|-------|
@@ -152,6 +180,9 @@ Copy `.tekton/rhodf-fbc-4-22-on-push.yaml` or `rhwa-fbc-422` PAC files and set:
 | `metadata.namespace` | `rhdr-tenant` |
 | `params.path-context` | `v4.22` |
 | `params.dockerfile` | `catalog.Dockerfile` |
+| `run-opm-command.IDMS_PATH` | `.tekton/images-mirror-set.yaml` |
+
+PAC CEL triggers on `v4.22/**` and `.tekton/**` changes (including IDMS).
 
 ---
 
@@ -239,18 +270,17 @@ apiVersion: appstudio.redhat.com/v1alpha1
 kind: ReleasePlan
 metadata:
   labels:
-    release.appstudio.openshift.io/auto-release: "true"
-    release.appstudio.openshift.io/releasePlanAdmission: rhdr-fbc-stage
+    release.appstudio.openshift.io/auto-release: "false"
+    release.appstudio.openshift.io/releasePlanAdmission: rhdr-fbc-4-22-stage
     release.appstudio.openshift.io/standing-attribution: "true"
   name: rhdr-fbc-4-22-stage-release-plan
   namespace: rhdr-tenant
 spec:
   application: rhdr-fbc-4-22
-  releaseGracePeriodDays: 30
   target: rhtap-releng-tenant
 ```
 
-`auto-release: "true"` triggers a staging release after each successful FBC build + Conforma pass. Set to `"false"` for manual release approval (RHODF stage convention).
+`auto-release: "false"` requires manual stage release approval (current setting in `fbc-4-22.yaml`).
 
 Add a prod ReleasePlan + `rhdr-fbc-prod` RPA when ready for production index publish.
 
@@ -304,68 +334,19 @@ Constraint file `constraints/product/rhdr.yaml` already permits `fbc-rhdr-stage`
 
 ## Step 6: ReleasePlanAdmission for FBC (managed namespace)
 
-Create `config/stone-prod-p02.hjvn.p1/product/ReleasePlanAdmission/rh-ocp-dr/rhdr-catalog-4-22-stage.yaml`:
+Actual file: `config/stone-prod-p02.hjvn.p1/product/ReleasePlanAdmission/rhdr/rhdr-fbc-4-22-stage.yaml`
 
-```yaml
-apiVersion: appstudio.redhat.com/v1alpha1
-kind: ReleasePlanAdmission
-metadata:
-  labels:
-    release.appstudio.openshift.io/block-releases: "false"
-    pp.engineering.redhat.com/business-unit: other
-  name: rhdr-fbc-stage
-  namespace: rhtap-releng-tenant
-  annotations:
-    operator_name: rhdr
-    rhel_target: el9
-spec:
-  applications:
-    - rhdr-fbc-4-22
-  origin: rhdr-tenant
-  policy: fbc-rhdr-stage
-  data:
-    releaseNotes:
-      product_id: [1119]
-      product_name: "Red Hat Disaster Recovery"
-      product_version: "fbc"
-    intention: staging
-    fbc:
-      stagedIndex: true
-      fromIndex: 'registry-proxy.engineering.redhat.com/rh-osbs/iib-pub-pending:{{ OCP_VERSION }}'
-      binaryImage: 'registry.redhat.io/openshift4/ose-operator-registry-rhel9:{{ OCP_VERSION }}'
-      targetIndex: ''
-      publishingCredentials: "staged-index-fbc-publishing-credentials"
-      requestTimeoutSeconds: 1500
-      buildTimeoutSeconds: 1500
-      allowedPackages:
-        - rhdr-hub-operator
-        - rhdr-cluster-operator
-        - rhdr-multicluster-operator
-        - rhdr-csi-addons-operator
-  pipeline:
-    pipelineRef:
-      resolver: git
-      params:
-        - name: url
-          value: "https://github.com/konflux-ci/release-service-catalog.git"
-        - name: revision
-          value: production
-        - name: pathInRepo
-          value: "pipelines/managed/fbc-release/fbc-release.yaml"
-    serviceAccountName: release-index-image-staging
-    timeouts:
-      pipeline: "8h0m0s"
-      tasks: "7h50m0s"
-      finally: "0h10m0s"
-```
-
-**Customize:**
+Key fields:
 
 | Field | Value |
 |-------|-------|
-| `product_id` | `1119` (from existing `rhdr-4-22-stage` RPA) |
-| `allowedPackages` | Must match `olm.package` names in `catalog.json` |
-| `{{ OCP_VERSION }}` | Resolved at release time from FBC fragment `com.redhat.openshift.versions` label |
+| `metadata.name` | `rhdr-fbc-4-22-stage` |
+| `spec.policy` | `fbc-rhdr-stage` |
+| `spec.applications` | `rhdr-fbc-4-22` |
+| `spec.origin` | `rhdr-tenant` |
+| `product_id` | `1119` |
+| `allowedPackages` | `rhdr-hub-operator`, `rhdr-cluster-operator`, `rhdr-multicluster-operator`, `rhdr-csi-addons-operator` |
+| Pipeline | `pipelines/managed/fbc-release/fbc-release.yaml` |
 
 ---
 
@@ -416,14 +397,19 @@ Create `rhdr-catalog` with `v4.22/catalog/`, `catalog.Dockerfile`, and `.tekton/
 
 | Step | Action |
 |------|--------|
-| 1 | Merge component fixes → `rhdr-4-22` builds + stage release |
-| 2 | Collect bundle digests ([extract-release-artifacts.sh](../TestingBuildsDeliverables/extract-release-artifacts.sh) or `skopeo inspect`) |
-| 3 | Update 4 bundle entries in `rhdr-fbc/v4.22/catalog.json` |
-| 4 | Merge `rhdr-fbc` → PAC runs `fbc-builder` |
-| 5 | Conforma (`fbc-rhdr-stage`) passes → FBC release to operator index |
-| 6 | Validate operators in test cluster |
+| 1 | Merge component fixes → `rhdr-4-22` builds on quay |
+| 2 | Resolve quay digests per bundle (`skopeo inspect ...:v4.22.0-XX`) |
+| 3 | Update `bundle-images.env` in `rhdr-catalog` |
+| 4 | `make catalog-staging && make validate && make build` |
+| 5 | Commit and push `rhdr-catalog` → PAC runs `fbc-builder` |
+| 6 | Conforma (`fbc-rhdr-stage`) passes → FBC release to operator index |
+| 7 | Validate operators in test cluster |
 
-**No upgrade graph:** replace the bundle digest in the existing `stable` channel entry only.
+**Staging workflow (now):** catalog uses quay BUILD pullspecs — allowed by `fbc-rhdr-stage` ECP.
+
+**Production workflow (after stage release):** `make catalog-production` swaps quay → `registry.stage.redhat.io` per `rhdr-4-22-stage` RPA.
+
+**No upgrade graph:** replace the bundle digest in the existing `stable-4.22` channel entry only.
 
 ---
 
@@ -432,9 +418,17 @@ Create `rhdr-catalog` with `v4.22/catalog/`, `catalog.Dockerfile`, and `.tekton/
 ### Local
 
 ```bash
-cd rhdr-fbc/v4.22
-opm validate catalog.json   # or opm validate catalog/ if using directory layout
+cd rhdr-catalog
+make catalog-staging
+make validate
+make build
+
+# Sanity checks
+jq -r '.image' v4.22/catalog/*/bundles/*.json
+# Expect: quay.io/redhat-user-workloads/rhdr-tenant/rhdr/*
 ```
+
+Prerequisites: `podman login registry.redhat.io` and quay auth (see `scripts/opm-container.sh`).
 
 ### After Konflux build
 
@@ -458,32 +452,31 @@ Expect: `rhdr-hub-operator`, `rhdr-cluster-operator`, `rhdr-multicluster-operato
 
 | Item | Status | Detail |
 |------|--------|--------|
-| FBC GitLab repo created | **Pushed** | `rh-ocp-dr/rhdr-catalog` — `main` branch pushed to GitLab |
-| Catalog scaffolding | **Pushed** | `v4.22/catalog/`, `catalog.Dockerfile`, `.tekton/` PAC definitions |
-| Bundle rebrand (4 repos) | **Pushed** | OLM package names changed to `rhdr-*` in all 4 bundle repos on `4.22` branch |
-| Konflux scripts fix | **Pushed** | `update_bundle.sh` / `test_update_bundle.sh` updated to match new CSV filenames |
-| Tenant GitOps (MR 1) | **Pushed** | Branch `rhdr-fbc-4-22-tenant-config` — [MR !19991](https://gitlab.cee.redhat.com/releng/konflux-release-data/-/merge_requests/19991) merged |
-| Releng ECP + RPA (MR 2) | **Local, needs push** | Branch `rhdr-fbc-4-22-releng-config` — 2 commits ahead of remote, `allowedPackages` updated to `rhdr-*` names, `tox -e test` passes |
-| Pyxis `fbc_opt_in` | **Done** | All 4 bundles in `rhdr.yaml` have `fbc_opt_in: true` |
+| FBC GitLab repo | **Done** | `rh-ocp-dr/rhdr-catalog` on `main` |
+| Catalog scaffolding | **Done** | RHODF split JSON, `catalog.Dockerfile`, `.tekton/` PAC |
+| Catalog tooling | **Done** | `Makefile`, `gen-catalog.sh`, `bundle-images.env`, `image-mappings.env` |
+| Registry mapping | **Done** | Paths from `rhdr.yaml`, `rhdr-4-22-stage` RPA, `rhdr-4-22.yaml` only |
+| `opm-container.sh` | **Done** | Auth + `policy.json` for quay pulls (RHWA pattern) |
+| IDMS | **Done** | `.tekton/images-mirror-set.yaml`, `IDMS_PATH` in PAC |
+| Channel / packages | **Done** | `stable-4.22`, OLM names `rhdr-*` match `allowedPackages` |
+| Bundle rebrand (4 repos) | **Done** | OLM package names `rhdr-*` on `4.22` branch |
+| Tenant GitOps | **Done** | `fbc-fragments/4-22/fbc-4-22.yaml` merged |
+| Releng ECP + RPA | **Done** | `fbc-rhdr-stage`, `rhdr-fbc-4-22-stage` |
+| Pyxis `fbc_opt_in` | **Done** | All 4 bundles in `rhdr.yaml` |
+| Local validation | **Done** | `make catalog-staging`, `make validate`, `make build` pass |
 
 ### Remaining
 
 | Item | Blocked on | Action |
 |------|-----------|--------|
-| Push releng MR | Nothing | `git push origin rhdr-fbc-4-22-releng-config` and open/update MR |
-| Merge releng MR | Releng review | Get approval to merge ECP + RPA |
-| Konflux rebuilds bundles | Pushed (awaiting PAC trigger) | Verify all 4 bundles rebuild with new `rhdr-*` package names |
-| Regenerate FBC catalog JSON | Rebuilt bundles released to staging | Run `./scripts/update-bundle-json.sh` in `rhdr-catalog` with new digests |
-| Push updated catalog | Regenerated JSON | Commit and push new `bundles/*.json` to `rh-ocp-dr/rhdr-catalog` |
-| ArgoCD sync | Tenant MR merged | Verify `rhdr-fbc-4-22` Application/Component appear in `rhdr-tenant` |
-| PAC webhook fires | ArgoCD sync | Confirm PipelineRun `rhdr-fbc-4-22-on-push` succeeds |
-| Conforma passes | FBC build succeeds | Verify `fbc-rhdr-stage` policy passes |
-| Stage Release | Conforma pass | Manually create/approve stage Release |
-| OLM validation | Stage Release | `kubectl get packagemanifests -n openshift-marketplace \| grep rhdr` |
+| Konflux pipeline green | Push updated catalog | Verify `validate-fbc` + Conforma pass |
+| Stage FBC release | Conforma pass | Approve stage Release (`auto-release: false`) |
+| OLM validation | Stage release | `kubectl get packagemanifests \| grep rhdr` |
+| `catalog-production` | `rhdr-4-22-stage` images on registry.stage | Run after container stage release |
 
 ### Deferred (CPaaS legacy scripts)
 
-The `pre_render_templates` and `render_fdf_templates` scripts in all 4 bundle repos still contain old ODF/ODR package names. These are CPaaS/dist-git build scripts — not used by Konflux. They will be updated in a separate effort when CPaaS is fully retired.
+The `pre_render_templates` and `render_fdf_templates` scripts in bundle repos still contain old ODF/ODR package names. Not used by Konflux.
 
 ---
 
@@ -502,17 +495,16 @@ The `pre_render_templates` and `render_fdf_templates` scripts in all 4 bundle re
 
 ## Post-merge runbook (first FBC release)
 
-1. Push `rhdr-fbc-4-22-releng-config` branch and open/update MR on `konflux-release-data`.
-2. Get releng approval and merge the MR.
-3. Wait for ArgoCD to sync `rhdr-fbc-4-22` Application/Component in `rhdr-tenant`.
-4. Verify Konflux rebuilds all 4 bundles with new `rhdr-*` package names.
-5. After bundle stage release, run `./scripts/update-bundle-json.sh` in `rhdr-catalog` to pick up new digests.
-6. Push updated catalog JSON to `rh-ocp-dr/rhdr-catalog`.
-7. PAC triggers `fbc-builder` build → Conforma (`fbc-rhdr-stage`) passes.
-8. Manually create/approve **stage Release** (`auto-release: false` on ReleasePlan).
-9. Validate: `kubectl get packagemanifests -n openshift-marketplace | grep rhdr`
+1. Verify `rhdr-fbc-4-22` Application/Component synced in `rhdr-tenant`.
+2. Confirm all 4 bundle components built on quay with `rhdr-*` package names.
+3. Update `bundle-images.env` with quay `@sha256` digests (use version tags, not staging digests).
+4. Run `make catalog-staging && make validate && make build` in `rhdr-catalog`.
+5. Commit and push catalog changes to `rh-ocp-dr/rhdr-catalog`.
+6. PAC triggers `rhdr-fbc-4-22-on-push` → `validate-fbc` → `fbc-fips-check` → Conforma.
+7. Manually create/approve **stage Release** (`auto-release: false` on ReleasePlan).
+8. Validate: `kubectl get packagemanifests -n openshift-marketplace | grep rhdr`
 
-When Track 1 releases new bundles, update digests in `v4.22/catalog/*/bundles/*.json` and merge to `rhdr-catalog` `main`.
+When Track 1 releases new bundles, update `bundle-images.env` and re-run `make catalog-staging`.
 
 ---
 
@@ -520,11 +512,13 @@ When Track 1 releases new bundles, update digests in `v4.22/catalog/*/bundles/*.
 
 ### GitLab (`rhdr-catalog`)
 
-- [x] Repo scaffolded locally with `v4.22/catalog/`, `catalog.Dockerfile`, `.tekton/`
-- [x] 4 operator packages with staging `@sha256` digests
-- [x] Pushed to `https://gitlab.cee.redhat.com/rh-ocp-dr/rhdr-catalog`
-- [ ] PAC webhook active after tenant MR merge + ArgoCD sync
-- [ ] Catalog JSON regenerated with rebranded bundle digests
+- [x] Repo with `v4.22/catalog/`, `catalog.Dockerfile`, `.tekton/`
+- [x] `Makefile`, `gen-catalog.sh`, `bundle-images.env`, `image-mappings.env`
+- [x] Channel `stable-4.22`, OLM packages `rhdr-*`
+- [x] IDMS `images-mirror-set.yaml`
+- [x] PAC CEL triggers fixed
+- [x] Local `make catalog-staging`, `make validate`, `make build` verified
+- [ ] Konflux pipeline green (validate-fbc + Conforma)
 
 ### Bundle repos (OLM rebrand)
 
@@ -542,13 +536,12 @@ When Track 1 releases new bundles, update digests in `v4.22/catalog/*/bundles/*.
 - [x] `kustomization.yaml` updated + auto-generated committed
 - [x] MR !19991 merged
 
-### Releng config (MR 2)
+### Releng config
 
-- [x] `fbc-rhdr-stage` ECP (`registry.stage.redhat.io/` for OLM images)
+- [x] `fbc-rhdr-stage` ECP (allows quay BUILD + stage + prod prefixes)
 - [x] `rhdr-fbc-4-22-stage` RPA with 4 `allowedPackages` (rhdr-* names)
-- [x] `tox -e test` passes (uniqueness test — no conflicts with RHODF)
-- [ ] Branch pushed (2 local commits ahead of remote)
-- [ ] MR opened and merged
+- [x] `tox -e test` passes
+- [x] Merged to `konflux-release-data` main
 
 ### Existing (already done)
 
@@ -571,7 +564,7 @@ When Track 1 releases new bundles, update digests in `v4.22/catalog/*/bundles/*.
 |----------|------|
 | RHDR pyxis product | `pyxis-repo-configs/products/rhdr/rhdr.yaml` |
 | Container RPA (9 components) | `config/.../ReleasePlanAdmission/rhdr/rhdr-4-22-stage.yaml` |
-| FBC RPA template | `config/.../ReleasePlanAdmission/rhwa/rhwa-fbc-stage.yaml` |
+| FBC RPA | `config/.../ReleasePlanAdmission/rhdr/rhdr-fbc-4-22-stage.yaml` |
 | RHODF FBC GitOps | `tenants-config/.../rhodf-tenant/fbc-fragments/4-22/fbc-4-22.yaml` |
 | RHDR constraints | `constraints/product/rhdr.yaml` |
 
@@ -580,6 +573,28 @@ When Track 1 releases new bundles, update digests in `v4.22/catalog/*/bundles/*.
 ## Related JIRA
 
 - [VIRTDR-141](https://redhat.atlassian.net/browse/VIRTDR-141) — Konflux tenant setup
+
+---
+
+## Progress log (2026-07-13)
+
+### Catalog implementation
+
+- [x] `Makefile` with `catalog-staging`, `catalog-production`, `validate`, `build`
+- [x] `gen-catalog.sh` — quay render + `olm.csv.metadata` migration + registry rewrite
+- [x] `image-mappings.env` — prod/stage/build paths from authoritative GitOps/Pyxis only
+- [x] `opm-container.sh` — auth + `policy.json` for in-container quay pulls (RHWA pattern)
+- [x] `.tekton/images-mirror-set.yaml` — IDMS for FIPS check fallback
+- [x] PAC CEL filename fixes + IDMS in path triggers
+- [x] Channel renamed to `stable-4.22`
+- [x] Local workflow verified: `make catalog-staging && make validate && make build`
+
+### Remaining
+
+1. Push catalog changes to `rh-ocp-dr/rhdr-catalog`
+2. Verify Konflux `rhdr-fbc-4-22-on-push` pipeline passes
+3. Approve stage FBC release
+4. OLM smoke test on test cluster
 
 ---
 

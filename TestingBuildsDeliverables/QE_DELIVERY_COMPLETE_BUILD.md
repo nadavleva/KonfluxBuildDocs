@@ -1,6 +1,8 @@
 # RHDR Complete Build - QE Delivery Package
 ## All 9 Components Successfully Published to Staging
 
+> **FBC catalog available:** If the FBC release pipeline (`rhdr-fbc-4-22`) has completed, prefer delivering the **IIB index image** as a CatalogSource instead of individual bundle pullspecs. See [VerifyBuildImages.md — FBC Release: IIB Index Image for QE](./VerifyBuildImages.md#fbc-release-iib-index-image-for-qe-recommended).
+
 **Build Date:** 2026-06-29  
 **Status:** ✅ **ALL 9 COMPONENTS PUBLISHED**  
 **Namespace:** `rhdr-tenant` (stone-prod-p02)

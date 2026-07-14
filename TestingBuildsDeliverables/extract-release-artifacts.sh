@@ -8,6 +8,11 @@
 # Optional: Mirror images to quay.io registry (recommended for QE)
 # Usage: ./extract-release-artifacts.sh [namespace] [release-limit] [quay-mirror]
 # Example: ./extract-release-artifacts.sh rhdr-tenant 10 true
+#
+# For complete QE delivery (IIB index + IDMS + CatalogSource + prod-path aliases),
+# use prepare-qe-delivery.sh instead:
+#   ./prepare-qe-delivery.sh              # extract only
+#   ./prepare-qe-delivery.sh --mirror     # full no-VPN mirror package
 
 set -u
 set -o pipefail

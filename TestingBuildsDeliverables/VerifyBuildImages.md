@@ -667,6 +667,8 @@ podman pull registry.stage.redhat.io/rhdr/rhdr-csi-addons-operator-bundle:v4.22
 
 ## FBC Release: IIB Index Image for QE (Recommended)
 
+> **Detailed guide:** [rhdr-catalog/docs/QE-DELIVERY.md](../../rhdr/rhdr-catalog/docs/QE-DELIVERY.md) — Makefile targets, mirroring, IDMS, and QE apply order.
+
 After the **FBC release pipeline** (`rhdr-fbc-4-22`) completes, Konflux produces a **staged IIB index image** that contains all four RHDR operator packages in a single OLM catalog. This is the preferred QE deliverable — QE installs operators through OperatorHub instead of pulling individual bundles or running `operator-sdk run bundle` per operator.
 
 ### How the FBC Release Works
